@@ -4,6 +4,11 @@ import fitz  # PyMuPDF
 import tempfile
 import streamlit as st
 import pandas as pd
+import numpy as np
+import logging
+
+from PIL import Image
+from io import BytesIO
 
 from langchain.vectorstores import FAISS
 from langchain.embeddings import OllamaEmbeddings
@@ -14,8 +19,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 import layoutparser as lp
 import easyocr
-from PIL import Image
-from io import BytesIO
 
 # === Constants ===
 DB_DIR = "vectorstore"
@@ -23,6 +26,9 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 EMBED_MODEL = "nomic-embed-text"
 LLM_MODEL = "mistral:7b-instruct"
 OCR_MODEL = easyocr.Reader(['en'])
+
+# === Logging Config ===
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # === Helper: Extract text from PDFs ===
 def extract_text_from_pdf(pdf_path):
@@ -103,9 +109,14 @@ with st.sidebar:
         st.session_state.chat = []
         st.session_state.vs = None
 
-# === Chat Session State ===
+# === Session State ===
 if "vs" not in st.session_state:
-    st.session_state.vs = FAISS.load_local(DB_DIR, OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)) if os.path.exists(DB_DIR) else None
+    if os.path.exists(DB_DIR):
+        try:
+            st.session_state.vs = FAISS.load_local(DB_DIR, OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL))
+        except Exception as e:
+            logging.error(f"Error loading FAISS DB: {e}")
+            st.session_state.vs = None
 
 if "chat" not in st.session_state:
     st.session_state.chat = []
@@ -118,11 +129,15 @@ for msg in st.session_state.chat:
 if query := st.chat_input("Ask a question about your PDFs..."):
     st.session_state.chat.append({"role": "user", "content": query})
     if st.session_state.vs:
-        chain = get_chain(st.session_state.vs)
-        with st.spinner("Thinking..."):
-            response = "".join(chain.stream(query))
-        st.session_state.chat.append({"role": "assistant", "content": response})
-        st.chat_message("assistant").markdown(response)
+        try:
+            chain = get_chain(st.session_state.vs)
+            with st.spinner("Thinking..."):
+                response = "".join(chain.stream(query))
+            st.session_state.chat.append({"role": "assistant", "content": response})
+            st.chat_message("assistant").markdown(response)
+        except Exception as e:
+            logging.error(f"LLM query failed: {e}")
+            st.chat_message("assistant").markdown("⚠️ LLM query failed. Please check logs or retry.")
     else:
         st.chat_message("assistant").markdown("Please upload and index PDFs first.")
 
@@ -134,10 +149,14 @@ if uploaded_files:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(pdf.read())
             tmp_path = tmp.name
-        tables = extract_tables_with_ocr(tmp_path)
-        for i, table_df in enumerate(tables):
-            st.markdown(f"*Table {i+1} (raw OCR):*")
-            st.dataframe(table_df)
-            cleaned_df = clean_table_with_llm(table_df)
-            st.markdown(f"*Table {i+1} (cleaned with LLaMA 3):*")
-            st.dataframe(cleaned_df)
+        try:
+            tables = extract_tables_with_ocr(tmp_path)
+            for i, table_df in enumerate(tables):
+                st.markdown(f"*Table {i+1} (raw OCR):*")
+                st.dataframe(table_df)
+                cleaned_df = clean_table_with_llm(table_df)
+                st.markdown(f"*Table {i+1} (cleaned with LLaMA 3):*")
+                st.dataframe(cleaned_df)
+        except Exception as e:
+            logging.error(f"Failed table extraction for {pdf.name}: {e}")
+            st.warning(f"❌ Failed to extract tables from {pdf.name}")
