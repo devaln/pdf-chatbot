@@ -1,35 +1,15 @@
-# Streamlit App
 streamlit
+fitz
+PyMuPDF
+easyocr
+pillow
 pandas
 numpy
-openpyxl
-Pillow
-
-# PDF Processing
 pdfplumber
-PyMuPDF
-fitz  # alias for PyMuPDF (optional install hint)
-
-# OCR & Layout
-easyocr
-layoutparser[layoutmodels,tesseract]  # uses paddleocr internally
-paddleocr
-opencv-python-headless
-
-# LangChain & Ollama
-langchain
-langchain-core
-langchain-community
-langchain-text-splitters
-langchainhub
-
-# Ollama embeddings & LLM
+camelot-py[cv]
+ghostscript
+langchain-community>=0.0.18
+langchain-core>=0.0.27
 faiss-cpu
-nomic
-sentence-transformers
-
-# Others
-tqdm
-layoutparser[ocr]
-paddleocr
-paddlepaddle
+transformers
+mypdf

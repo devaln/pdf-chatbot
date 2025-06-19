@@ -1,0 +1,169 @@
+2025-06-19 12:23:42,649 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:23:46,057 [INFO] Loading faiss with AVX512 support.
+2025-06-19 12:23:46,057 [INFO] Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2025-06-19 12:23:46,057 [INFO] Loading faiss with AVX2 support.
+2025-06-19 12:23:46,723 [INFO] Successfully loaded faiss with AVX2 support.
+2025-06-19 12:23:46,733 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-06-19 12:24:51,288 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:24:59,875 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:27:29,916 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:27:31,275 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:27:34,511 [WARNING] pdfplumber failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 12:27:35,369 [WARNING] camelot lattice failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 12:27:35,597 [WARNING] camelot stream failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 12:29:35,268 [WARNING] pdfplumber failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 12:29:35,924 [WARNING] camelot lattice failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 12:29:36,007 [WARNING] camelot stream failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 12:29:49,575 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:30:14,515 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:30:18,134 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:30:39,466 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:30:53,329 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:32:27,746 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:42:18,467 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:42:21,288 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:42:31,027 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 12:42:35,262 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:41:37,276 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:41:55,314 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:50:22,157 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:50:45,855 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:50:55,331 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:51:00,569 [WARNING] pdfplumber failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:51:02,339 [WARNING] camelot lattice failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:51:02,662 [WARNING] camelot stream failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:52:55,885 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:53:17,845 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:53:19,107 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:53:27,120 [WARNING] pdfplumber failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:53:28,560 [WARNING] camelot lattice failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:53:28,909 [WARNING] camelot stream failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:53:30,569 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:56:30,753 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:56:41,389 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:56:46,169 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:56:49,342 [WARNING] pdfplumber failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:56:50,222 [WARNING] camelot lattice failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:56:50,403 [WARNING] camelot stream failed: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 13:58:46,714 [INFO] Loading faiss with AVX512 support.
+2025-06-19 13:58:46,714 [INFO] Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2025-06-19 13:58:46,715 [INFO] Loading faiss with AVX2 support.
+2025-06-19 13:58:46,761 [INFO] Successfully loaded faiss with AVX2 support.
+2025-06-19 13:58:46,779 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-06-19 13:58:55,717 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:58:56,792 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:59:04,617 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:59:21,303 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 13:59:26,691 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:06:42,979 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:07:25,614 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:07:28,876 [INFO] Loading faiss with AVX512 support.
+2025-06-19 14:07:28,876 [INFO] Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2025-06-19 14:07:28,876 [INFO] Loading faiss with AVX2 support.
+2025-06-19 14:07:28,904 [INFO] Successfully loaded faiss with AVX2 support.
+2025-06-19 14:07:28,915 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-06-19 14:07:48,951 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:15:40,147 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:15:40,152 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:15:47,000 [INFO] Loading faiss with AVX512 support.
+2025-06-19 14:15:47,000 [INFO] Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2025-06-19 14:15:47,000 [INFO] Loading faiss with AVX2 support.
+2025-06-19 14:15:47,038 [INFO] Successfully loaded faiss with AVX2 support.
+2025-06-19 14:15:47,055 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-06-19 14:17:25,903 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:17:29,142 [INFO] Loading faiss with AVX512 support.
+2025-06-19 14:17:29,143 [INFO] Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2025-06-19 14:17:29,143 [INFO] Loading faiss with AVX2 support.
+2025-06-19 14:17:29,181 [INFO] Successfully loaded faiss with AVX2 support.
+2025-06-19 14:17:29,189 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-06-19 14:17:33,679 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:17:38,589 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:29:47,343 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:30:38,247 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:30:38,254 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:30:44,792 [INFO] Loading faiss with AVX512 support.
+2025-06-19 14:30:44,792 [INFO] Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2025-06-19 14:30:44,792 [INFO] Loading faiss with AVX2 support.
+2025-06-19 14:30:44,826 [INFO] Successfully loaded faiss with AVX2 support.
+2025-06-19 14:30:44,835 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-06-19 14:41:23,182 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:41:25,119 [INFO] Loading faiss with AVX512 support.
+2025-06-19 14:41:25,119 [INFO] Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2025-06-19 14:41:25,119 [INFO] Loading faiss with AVX2 support.
+2025-06-19 14:41:25,154 [INFO] Successfully loaded faiss with AVX2 support.
+2025-06-19 14:41:25,166 [INFO] Failed to load GPU Faiss: name 'GpuIndexIVFFlat' is not defined. Will not load constructor refs for GPU indexes. This is only an error if you're trying to use GPU Faiss.
+2025-06-19 14:41:34,074 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:41:39,503 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:51:19,199 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 14:54:49,385 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:21:07,964 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:21:14,456 [INFO] FAISS DB directory './faiss_db' cleared.
+2025-06-19 15:21:17,449 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:21:25,819 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:21:29,457 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:21:46,408 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:26:19,697 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:30:54,347 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:34:04,340 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:36:58,179 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:36:59,210 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:37:10,912 [INFO] FAISS DB directory './faiss_db' cleared.
+2025-06-19 15:37:23,184 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:37:32,132 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:37:39,612 [WARNING] pdfplumber failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:37:42,082 [WARNING] camelot lattice failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:37:42,617 [WARNING] camelot stream failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:40:28,255 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:40:36,020 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:40:43,523 [WARNING] pdfplumber failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:40:45,708 [WARNING] camelot lattice failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:40:46,253 [WARNING] camelot stream failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:45:11,530 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:45:20,928 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:45:28,601 [WARNING] pdfplumber failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:45:30,803 [WARNING] camelot lattice failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:45:31,366 [WARNING] camelot stream failed for Bangalore_Closure_Report-1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:50:15,861 [WARNING] pdfplumber failed for PC_Project_Quarterly_report_fMARCH_25-6- 1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:50:17,599 [WARNING] camelot lattice failed for PC_Project_Quarterly_report_fMARCH_25-6- 1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:50:17,817 [WARNING] camelot stream failed for PC_Project_Quarterly_report_fMARCH_25-6- 1p.pdf: module 'pandas.io.parsers' has no attribute 'ParserBase'
+2025-06-19 15:53:47,817 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:53:54,473 [INFO] FAISS DB directory './faiss_db' cleared.
+2025-06-19 15:53:55,824 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:53:57,019 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:54:10,132 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:54:31,329 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:54:40,035 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 15:59:23,136 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:02:02,798 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:05:47,600 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:05:53,999 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:06:29,447 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:07:05,918 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:07:08,760 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:11:53,218 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:11:59,717 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:13:12,789 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:13:15,338 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:13:33,309 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:13:35,848 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:14:52,242 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:14:58,692 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:15:23,212 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:15:27,990 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:15:41,228 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:18:28,823 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:18:35,024 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:20:04,306 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:20:07,912 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:20:25,458 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:20:34,579 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:21:15,037 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:23:47,739 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2025-06-19 16:23:51,248 [WARNING] Using CPU. Note: This module is much faster with a GPU.
