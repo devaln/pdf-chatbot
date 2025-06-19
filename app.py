@@ -1,360 +1,143 @@
 import os
-# Set the environment variable to allow multiple OpenMP runtimes.
-# This should be done at the very beginning of the script to be effective.
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
-import tempfile
 import shutil
-import logging
-
+import fitz  # PyMuPDF
+import tempfile
 import streamlit as st
 import pandas as pd
-import numpy as np
-from PIL import Image
-import fitz  # PyMuPDF
+
+from langchain.vectorstores import FAISS
+from langchain.embeddings import OllamaEmbeddings
+from langchain.chains import RetrievalQA
+from langchain.llms import Ollama
+from langchain.document_loaders import PyMuPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+import layoutparser as lp
 import easyocr
-import pdfplumber
-import camelot
+from PIL import Image
+from io import BytesIO
 
-# Import the custom table extraction function
-from table_extraction_with_llm import extract_tables_with_llm
-
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_community.chat_models import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.documents import Document
-from langchain_core.runnables import RunnablePassthrough
-
-# --- Configuration Constants ---
+# === Constants ===
+DB_DIR = "vectorstore"
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_LLM_MODEL = "llama3:latest"
-OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
-DB_DIR = "./faiss_db" # Directory to store FAISS vector store
+EMBED_MODEL = "nomic-embed-text"
+LLM_MODEL = "mistral:7b-instruct"
+OCR_MODEL = easyocr.Reader(['en'])
 
-# --- Logging Configuration ---
-# Set up basic logging to a file for debugging
-logging.basicConfig(level=logging.INFO, filename="app.log",
-                    format="%(asctime)s [%(levelname)s] %(message)s")
+# === Helper: Extract text from PDFs ===
+def extract_text_from_pdf(pdf_path):
+    loader = PyMuPDFLoader(pdf_path)
+    docs = loader.load()
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    return splitter.split_documents(docs)
 
-# --- Streamlit Page Configuration ---
-st.set_page_config(page_title="PDF Table & Text Extractor", layout="wide")
-# Set sidebar background color to white
-st.markdown("""
-    <style>
-        section[data-testid="stSidebar"] {
-            background-color: white !important;
-            border-right: 2px solid #e0e0e0 !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
-st.title("📄 PDF Text & Table Extractor + Chat QA")
-
-# Initialize EasyOCR reader once for performance
-ocr_reader = easyocr.Reader(['en'], gpu=False)
-
-# --- Helper Functions ---
-
-def clean_df(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Cleans a DataFrame by deduping column names and filling NaN values with empty strings.
-    Args:
-        df (pd.DataFrame): The input DataFrame.
-    Returns:
-        pd.DataFrame: The cleaned DataFrame.
-    """
-    # Deduplicate column names (e.g., if multiple columns have the same header)
-    df.columns = pd.io.parsers.ParserBase({'names': df.columns})\
-                     ._maybe_dedup_names(df.columns)
-    return df.fillna("") # Fill any NaN values with empty strings for cleaner output
-
-
-def extract_tables_pdfplumber(pdf_path: str) -> list[pd.DataFrame]:
-    """
-    Extracts tables from a PDF using pdfplumber.
-    Args:
-        pdf_path (str): Path to the PDF file.
-    Returns:
-        list[pd.DataFrame]: A list of extracted tables as pandas DataFrames.
-    """
-    dfs = []
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                tbls = page.extract_tables()
-                for table in tbls:
-                    # The first row is usually the header, rest are data
-                    if table: # Ensure table is not empty
-                        df = pd.DataFrame(table[1:], columns=table[0])
-                        dfs.append(clean_df(df))
-    except Exception as e:
-        # Log a warning if pdfplumber fails to extract tables
-        logging.warning(f"pdfplumber failed for {os.path.basename(pdf_path)}: {e}")
-    return dfs
-
-
-def extract_tables_camelot(pdf_path: str) -> list[pd.DataFrame]:
-    """
-    Extracts tables from a PDF using Camelot (lattice and stream flavors).
-    Args:
-        pdf_path (str): Path to the PDF file.
-    Returns:
-        list[pd.DataFrame]: A list of extracted tables as pandas DataFrames.
-    """
-    dfs = []
-    for flavor in ["lattice", "stream"]: # Try both table extraction methods
-        try:
-            tables = camelot.read_pdf(pdf_path, pages='all', flavor=flavor)
-            for t in tables:
-                df = t.df
-                # Add DataFrame only if it has more than one row and column
-                if df.shape[0] > 1 and df.shape[1] > 1:
-                    dfs.append(clean_df(df))
-        except Exception as e:
-            # Log a warning if camelot fails for a specific flavor
-            logging.warning(f"camelot {flavor} failed for {os.path.basename(pdf_path)}: {e}")
-    return dfs
-
-
-def extract_easyocr_tables(pdf_path: str) -> list[pd.DataFrame]:
-    """
-    Extracts tables from a PDF using EasyOCR by processing page images.
-    This method is more robust for image-based tables.
-    Args:
-        pdf_path (str): Path to the PDF file.
-    Returns:
-        list[pd.DataFrame]: A list of extracted tables as pandas DataFrames.
-    """
+# === Helper: Extract and clean tables from scanned/digital PDFs ===
+def extract_tables_with_ocr(pdf_file):
     tables = []
-    try:
-        doc = fitz.open(pdf_path)
-    except Exception as e:
-        logging.error(f"Error opening PDF {pdf_path}: {e}")
-        return tables
+    doc = fitz.open(pdf_file)
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        pix = page.get_pixmap()
+        image = Image.open(BytesIO(pix.tobytes()))
+        layout = lp.PaddleDetectionLayoutModel('lp://TableBank/faster_rcnn_R_50_FPN_3x/config',
+                                               extra_config={"box_threshold": 0.5})
+        layout_result = layout.detect(image)
 
-    for page in doc:
-        try:
-            # Get a pixmap (image) of the page
-            pix = page.get_pixmap()
-            # Convert pixmap to PIL Image
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            # Perform OCR on the image to get text lines
-            lines = [l.strip() for l in ocr_reader.readtext(np.array(img), detail=0) if l.strip()]
-            # Attempt to structure lines into rows based on spaces
-            rows = [line.split() for line in lines if len(line.split()) > 1]
-            if len(rows) > 1: # Ensure there's at least a header and one row of data
-                df = pd.DataFrame(rows[1:], columns=rows[0])
-                tables.append(clean_df(df))
-        except Exception:
-            # Continue to the next page if OCR extraction fails for the current page
-            continue
+        for block in layout_result:
+            if block.type == "Table":
+                x1, y1, x2, y2 = map(int, block.block.bounding_box)
+                cropped_image = image.crop((x1, y1, x2, y2))
+                result = OCR_MODEL.readtext(np.array(cropped_image), detail=0)
+                if result:
+                    table_df = pd.DataFrame([r.split() for r in result if r.strip()])
+                    tables.append(table_df)
     return tables
 
+# === Helper: Clean tables with LLaMA 3 ===
+def clean_table_with_llm(table_df):
+    llm = Ollama(model="llama3", base_url=OLLAMA_BASE_URL)
+    prompt = f"Clean and normalize the following table:\n\n{table_df.to_csv(index=False)}"
+    cleaned = llm(prompt)
+    try:
+        return pd.read_csv(BytesIO(cleaned.encode()), on_bad_lines='skip')
+    except Exception:
+        return table_df
 
-def extract_all_tables(pdf_path: str) -> tuple[str, list[pd.DataFrame]]:
-    """
-    Extracts tables using multiple methods (pdfplumber, camelot, easyocr)
-    and then uses an LLM to structure additional tables.
-    Args:
-        pdf_path (str): Path to the PDF file.
-    Returns:
-        tuple[str, list[pd.DataFrame]]: A tuple containing:
-            - A combined string of all extracted table data (in CSV format).
-            - A list of pandas DataFrames from rule-based and OCR methods.
-    """
-    dfs = []
-    # Combine tables from different extraction methods
-    dfs += extract_tables_pdfplumber(pdf_path)
-    dfs += extract_tables_camelot(pdf_path)
-    dfs += extract_easyocr_tables(pdf_path)
-
-    # Use LLM for potentially more complex or unstructured table extraction
-    llm_csv = extract_tables_with_llm(pdf_path,
-                                      model=OLLAMA_LLM_MODEL,
-                                      base_url=OLLAMA_BASE_URL)
-    # Provide feedback if LLM extraction was not successful
-    if "No extractable content" in llm_csv or "LLM extraction failed" in llm_csv:
-        st.warning(f"⚠ LLM couldn't structure tables in {os.path.basename(pdf_path)}")
-
-    table_texts = []
-    # Display and convert rule-based/OCR extracted tables to CSV for RAG
-    for i, df in enumerate(dfs):
-        st.subheader(f"Table {i+1} (Raw)")
-        st.dataframe(df) # Display raw DataFrame in Streamlit
-        csv = df.to_csv(index=False)
-        table_texts.append(f"Table {i+1}:\n{csv}")
-
-    # Display LLM-structured tables and add to RAG context
-    st.subheader("LLM‑Structured Tables")
-    st.text(llm_csv) # Display the raw CSV string from LLM
-    table_texts.append("LLM-Structured Tables:\n" + llm_csv)
-
-    return "\n\n".join(table_texts), dfs
-
-
-@st.cache_resource(show_spinner=False)
-def load_and_index(files):
-    """
-    Loads PDF documents, extracts text and tables, chunks them, and creates/updates a FAISS vector store.
-    Uses Streamlit's cache_resource to prevent re-running on every interaction.
-    Args:
-        files (list): List of uploaded Streamlit file objects.
-    Returns:
-        FAISS: The FAISS vector store, or None if no documents were processed.
-    """
+# === Helper: Build index for RAG ===
+def build_index(pdf_files):
     all_docs = []
-    # Use a temporary directory to save uploaded PDF files
-    with tempfile.TemporaryDirectory() as td:
-        for file in files:
-            path = os.path.join(td, file.name)
-            with open(path, "wb") as f:
-                f.write(file.getbuffer()) # Write uploaded file content to temp file
-            try:
-                # Load PDF content using PyPDFLoader
-                loader = PyPDFLoader(path)
-                all_docs.extend(loader.load())
+    for pdf in pdf_files:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(pdf.read())
+            tmp_path = tmp.name
+        docs = extract_text_from_pdf(tmp_path)
+        all_docs.extend(docs)
 
-                # Extract tables and their text representations
-                text_csv, _ = extract_all_tables(path)
-                # Add table data as a separate document for RAG
-                all_docs.append(Document(page_content=text_csv,
-                                         metadata={"source": file.name}))
-            except Exception as e:
-                # Log and display errors for failed PDF processing
-                logging.error(f"Failed to process {file.name}: {e}")
-                st.error(f" Failed to process {file.name}: {e}")
+    embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
+    vectorstore = FAISS.from_documents(all_docs, embeddings)
+    vectorstore.save_local(DB_DIR)
+    return vectorstore
 
-    if not all_docs:
-        st.warning("No documents were successfully loaded or extracted.")
-        return None
+# === Helper: QA Chain ===
+def get_chain(vectorstore):
+    llm = Ollama(model=LLM_MODEL, base_url=OLLAMA_BASE_URL)
+    return RetrievalQA.from_chain_type(llm=llm, retriever=vectorstore.as_retriever())
 
-    # Chunk the documents for better retrieval
-    chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)\
-        .split_documents(all_docs)
-    try:
-        # Initialize Ollama embeddings and create/update FAISS index
-        embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL,
-                                      base_url=OLLAMA_BASE_URL)
-        vs = FAISS.from_documents(chunks, embeddings)
-        vs.save_local(DB_DIR) # Save the FAISS index locally
-        st.success("Documents processed and indexed successfully!")
-        return vs
-    except Exception as e:
-        logging.error(f"FAISS indexing error: {e}")
-        st.error(f"FAISS indexing error: {e}")
-        return None
+# === Streamlit App ===
+st.set_page_config(page_title="PDF Analyzer", layout="wide")
 
-
-def load_existing_index():
-    """
-    Loads an existing FAISS vector store from the local directory.
-    Returns:
-        FAISS: The loaded FAISS vector store, or None if not found or an error occurs.
-    """
-    if not os.path.exists(DB_DIR):
-        return None # Return None if the FAISS directory doesn't exist
-    try:
-        embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL,
-                                      base_url=OLLAMA_BASE_URL)
-        # Load the local FAISS index, allowing dangerous deserialization for simplicity
-        return FAISS.load_local(DB_DIR, embeddings,
-                                allow_dangerous_deserialization=True)
-    except Exception as e:
-        logging.error(f"Failed to load existing FAISS DB: {e}")
-        st.error(f"Failed to load existing FAISS DB: {e}")
-        return None
-
-
-def get_chat_chain(vs):
-    """
-    Creates and returns a LangChain RAG (Retrieval Augmented Generation) chain.
-    Args:
-        vs (FAISS): The FAISS vector store for retrieval.
-    Returns:
-        Runnable: A LangChain runnable chain for chat QA.
-    """
-    # Define the prompt template for the LLM
-    prompt = ChatPromptTemplate.from_template(
-        "You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:"
-    )
-    # Initialize the ChatOllama LLM
-    llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
-    # Construct the RAG chain: retrieve context -> pass to prompt -> LLM -> parse output
-    return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | \
-           prompt | llm | StrOutputParser()
-
-
-def clear_db():
-    """Clears the local FAISS database directory."""
-    if os.path.exists(DB_DIR):
-        shutil.rmtree(DB_DIR)
-        logging.info(f"FAISS DB directory '{DB_DIR}' cleared.")
-
-
-# --- Streamlit Sidebar ---
+# === Sidebar ===
 with st.sidebar:
-    st.image("img/ACL_Digital.png", width=180)
-    st.image("img/Cipla_Foundation.png", width=180)
-    st.markdown(""" <hr> """, unsafe_allow_html=True)
-    st.header("📂 Upload PDFs")
-    # File uploader widget for PDF files
-    uploaded = st.file_uploader("Select PDFs (multi-page OK)", type="pdf", accept_multiple_files=True)
-    run = st.button("📊 Extract & Index")
+    st.image("img/ACL_Digital.png", width=160)
+    st.image("img/Cipla_Foundation.png", width=160)
+    st.markdown("---")
+    uploaded_files = st.file_uploader("Upload PDFs", accept_multiple_files=True, type="pdf")
 
-    st.markdown(""" <hr> """, unsafe_allow_html=True)
-    st.header("🛠 Control")
-    # Button to clear the FAISS database
-    if st.button("🗑 Clear DB"):
-        clear_db()
-        st.session_state.vs = None # Reset the vector store in session state
-        st.success("DB cleared")
-    # Button to clear the chat history
-    if st.button("🧹 Clear Chat"):
-        st.session_state.msgs = []
-        st.success("Chat cleared")
+    if st.button("Index") and uploaded_files:
+        with st.spinner("Indexing documents... This might take a moment"):
+            st.session_state.vs = build_index(uploaded_files)
+        st.session_state.chat = [{"role": "assistant", "content": "Indexing done! You can now ask questions."}]
 
-# --- Main Application Logic ---
+    if st.button("Clear"):
+        shutil.rmtree(DB_DIR, ignore_errors=True)
+        st.session_state.chat = []
+        st.session_state.vs = None
 
-# Initialize session state variables if they don't exist
+# === Chat Session State ===
 if "vs" not in st.session_state:
-    st.session_state.vs = load_existing_index() # Load existing index on app start
-if "msgs" not in st.session_state:
-    st.session_state.msgs = [] # Initialize chat messages list
+    st.session_state.vs = FAISS.load_local(DB_DIR, OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)) if os.path.exists(DB_DIR) else None
 
-# Process uploaded PDFs if 'Extract & Index' button is clicked and files are uploaded
-if run and uploaded:
-    st.session_state.msgs = [] # Clear chat messages for new processing
-    with st.spinner("Processing documents and building index..."):
-        st.session_state.vs = load_and_index(uploaded) # Load and index the new PDFs
+if "chat" not in st.session_state:
+    st.session_state.chat = []
+
+# === Display Chat ===
+for msg in st.session_state.chat:
+    st.chat_message(msg["role"]).markdown(msg["content"])
+
+# === Query Input ===
+if query := st.chat_input("Ask a question about your PDFs..."):
+    st.session_state.chat.append({"role": "user", "content": query})
     if st.session_state.vs:
-        # Add a confirmation message to the chat
-        st.session_state.msgs.append({
-            "role": "assistant",
-            "content": "Extraction & indexing done. Ask anything!"
-        })
-
-# Display previous chat messages
-for msg in st.session_state.msgs:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# Chat input for user queries
-if query := st.chat_input("Ask about the PDF content or tables..."):
-    # Add user query to chat history
-    st.session_state.msgs.append({"role": "user", "content": query})
-    with st.chat_message("user"):
-        st.markdown(query) # Display user query in chat UI
-
-    if st.session_state.vs: # Only proceed if vector store is available
-        chain = get_chat_chain(st.session_state.vs) # Get the RAG chain
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."): # Show spinner while LLM is processing
-                # Stream the response from the LLM
-                resp = "".join(chain.stream(query))
-                st.markdown(resp) # Display LLM response
-                st.session_state.msgs.append({"role": "assistant", "content": resp}) # Add response to chat history
+        chain = get_chain(st.session_state.vs)
+        with st.spinner("Thinking..."):
+            response = "".join(chain.stream(query))
+        st.session_state.chat.append({"role": "assistant", "content": response})
+        st.chat_message("assistant").markdown(response)
     else:
-        st.error("Please upload and process PDFs first to enable chat functionality.")
+        st.chat_message("assistant").markdown("Please upload and index PDFs first.")
+
+# === Optional: Display Extracted Tables ===
+if uploaded_files:
+    st.markdown("### Extracted Tables")
+    for pdf in uploaded_files:
+        st.subheader(f"Tables from {pdf.name}")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(pdf.read())
+            tmp_path = tmp.name
+        tables = extract_tables_with_ocr(tmp_path)
+        for i, table_df in enumerate(tables):
+            st.markdown(f"*Table {i+1} (raw OCR):*")
+            st.dataframe(table_df)
+            cleaned_df = clean_table_with_llm(table_df)
+            st.markdown(f"*Table {i+1} (cleaned with LLaMA 3):*")
+            st.dataframe(cleaned_df)
