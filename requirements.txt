@@ -1,15 +1,50 @@
-streamlit
-fitz
-PyMuPDF
-easyocr
-pillow
-pandas
-numpy
-pdfplumber
-camelot-py[cv]
-ghostscript
-langchain-community>=0.0.18
-langchain-core>=0.0.27
-faiss-cpu
-transformers
-mypdf
+# streamlit
+# fitz
+# PyMuPDF
+# easyocr
+# pillow
+# pandas
+# numpy
+# pdfplumber
+# camelot-py[cv]
+# ghostscript
+# langchain-community>=0.0.18
+# langchain-core>=0.0.27
+# faiss-cpu
+# transformers
+# mypdf
+
+
+# Core UI and app framework
+streamlit>=1.32.0
+
+# PDF processing
+PyMuPDF==1.23.22         # for 'fitz' (PDF to image)
+pdfplumber==0.10.2        # for text-based PDF extraction
+pillow>=9.0.0             # for image handling
+
+# OCR (used only optionally now)
+pytesseract==0.3.10
+
+# Table detection (legacy, optional)
+layoutparser[layoutmodels]==0.3.4
+opencv-python-headless>=4.5.5.64  # used by layoutparser
+
+# LLM + RAG stack
+langchain>=0.1.17
+langchain-community>=0.0.32
+langchain-core>=0.1.52
+langchain-text-splitters>=0.0.1
+
+# Ollama integrations
+langchain-ollama>=0.0.11
+ollama>=0.1.9
+
+# Embeddings and Vector DB
+faiss-cpu>=1.7.4
+nomic==3.1.1               # for nomic-embed-text if needed
+
+# General utilities
+numpy>=1.23.0
+torch>=2.0.0
+tqdm
