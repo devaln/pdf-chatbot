@@ -1,4 +1,4 @@
-# app.py
+# app.py (OCR-only, no Donut)
 
 import os
 import tempfile
@@ -13,7 +13,8 @@ import pdfplumber
 import camelot
 import torch
 import requests
-from transformers import DonutProcessor, VisionEncoderDecoderModel
+import pytesseract
+from pdf2image import convert_from_path
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -35,14 +36,7 @@ DB_DIR = "./faiss_db"
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
 st.set_page_config(page_title="PDF QA with Tables", layout="wide")
-st.title("📄 PDF Text & Table Extractor + Chat QA")
-
-# --- Donut OCR setup ---
-donut_processor = DonutProcessor.from_pretrained("naver-clova-ix/donut-base")
-donut_model = VisionEncoderDecoderModel.from_pretrained("naver-clova-ix/donut-base")
-device = "cuda" if torch.cuda.is_available() else "cpu"
-donut_model.to(device)
-donut_model.eval()
+st.title("\U0001F4C4 PDF Text & Table Extractor + Chat QA")
 
 # --- Helpers ---
 def clean_df(df):
@@ -76,70 +70,64 @@ def extract_tables_camelot(pdf_path):
             logging.warning(f"camelot {flavor} failed for {os.path.basename(pdf_path)}: {e}")
     return dfs
 
-def extract_donut_tables(pdf_path):
-    dfs = []
+def extract_scanned_pdf_with_ocr(pdf_path):
     try:
-        doc = fitz.open(pdf_path)
-        for i, page in enumerate(doc):
-            pix = page.get_pixmap()
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            pixel_values = donut_processor(images=img, return_tensors="pt").pixel_values.to(device)
-            with torch.no_grad():
-                output = donut_model.generate(pixel_values, max_length=512)
-            prediction = donut_processor.batch_decode(output, skip_special_tokens=True)[0]
-            if 'table' in prediction:
-                try:
-                    df = pd.read_json(prediction.replace("\n", "").strip())
-                    dfs.append(clean_df(df))
-                except Exception as e:
-                    logging.warning(f"Donut output parsing failed: {e}")
-    except Exception as e:
-        logging.error(f"Donut OCR failed: {e}")
-        st.warning(f"⚠ Donut OCR failed on {os.path.basename(pdf_path)}: {e}")
-    return dfs
+        images = convert_from_path(pdf_path)
+        full_text = ""
+        for img in images:
+            text = pytesseract.image_to_string(img)
+            full_text += text + "\n"
 
-def extract_tables_with_llm(pdf_path, model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL):
+        llm_prompt = f"""You are a table understanding expert.
+Extract all tables from the following OCR text and convert them to CSV format:
+
+{full_text}
+
+Only return CSV-formatted tables."""
+
+        response = requests.post(
+            url=f"{OLLAMA_BASE_URL}/api/generate",
+            json={"model": OLLAMA_LLM_MODEL, "prompt": llm_prompt, "stream": False},
+            timeout=120
+        )
+        result = response.json()
+        csv_text = result.get("response", "")
+
+        st.subheader("LLM‑Structured Tables from OCR")
+        st.text(csv_text)
+        return csv_text, full_text
+    except Exception as e:
+        logging.error(f"OCR + LLM extraction failed: {e}")
+        st.error(f"OCR + LLM failed: {e}")
+        return "", ""
+
+def extract_all_tables(pdf_path, scanned_mode=False):
+    if scanned_mode:
+        return extract_scanned_pdf_with_ocr(pdf_path)
+
+    dfs = extract_tables_pdfplumber(pdf_path)
+    dfs += extract_tables_camelot(pdf_path)
+
     try:
         doc = fitz.open(pdf_path)
         text = "\n".join([page.get_text() for page in doc])
     except Exception as e:
-        logging.error(f"Failed to read PDF text: {e}")
-        return ""
+        logging.error(f"PDF text extraction failed: {e}")
+        text = ""
 
-    prompt = f"""
-You are a table understanding expert.
+    prompt = f"You are a table understanding expert.\n\nExtract all tables from the following document and convert them to CSV format:\n\n{text}\n\nOnly return CSV-formatted tables."
 
-Please extract all the tables from the following document and convert them to CSV format:
-
-{text}
-
-Only return CSV-formatted tables.
-"""
     try:
         response = requests.post(
-            url=f"{base_url}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
+            url=f"{OLLAMA_BASE_URL}/api/generate",
+            json={"model": OLLAMA_LLM_MODEL, "prompt": prompt, "stream": False},
             timeout=120
         )
-        response.raise_for_status()
         result = response.json()
-        return result.get("response", "LLM extraction failed")
+        llm_csv = result.get("response", "")
     except Exception as e:
-        logging.error(f"LLM request failed: {e}")
-        return "LLM extraction failed"
-
-def extract_all_tables(pdf_path):
-    dfs = extract_tables_pdfplumber(pdf_path)
-    dfs += extract_tables_camelot(pdf_path)
-    donut_dfs = extract_donut_tables(pdf_path)
-    dfs += donut_dfs
-
-    if not dfs and not donut_dfs:
-        st.warning("⚠ No tables found using traditional methods or OCR.")
-
-    llm_csv = extract_tables_with_llm(pdf_path)
-    if not llm_csv.strip():
-        st.warning(f"⚠ LLM couldn't structure tables in {os.path.basename(pdf_path)}")
+        logging.error(f"LLM extraction failed: {e}")
+        llm_csv = ""
 
     table_texts = []
     for i, df in enumerate(dfs):
@@ -151,10 +139,10 @@ def extract_all_tables(pdf_path):
     st.text(llm_csv)
     table_texts.append("LLM-Structured Tables:\n" + llm_csv)
 
-    return "\n\n".join(table_texts), dfs
+    return "\n\n".join(table_texts), text
 
 @st.cache_resource(show_spinner=False)
-def load_and_index(files):
+def load_and_index(files, scanned_mode=False):
     all_docs = []
     with tempfile.TemporaryDirectory() as td:
         for file in files:
@@ -166,8 +154,8 @@ def load_and_index(files):
                 loader = PyPDFLoader(path)
                 all_docs.extend(loader.load())
                 st.info("🔍 Extracting tables...")
-                text_csv, _ = extract_all_tables(path)
-                all_docs.append(Document(page_content=text_csv, metadata={"source": file.name}))
+                text_csv, raw_text = extract_all_tables(path, scanned_mode)
+                all_docs.append(Document(page_content=text_csv + "\n" + raw_text, metadata={"source": file.name}))
             except Exception as e:
                 logging.error(f"Failed to process {file.name}: {e}")
                 st.error(f"Failed to process {file.name}: {e}")
@@ -213,6 +201,7 @@ def clear_db():
 with st.sidebar:
     st.header("📂 Upload PDFs")
     uploaded = st.file_uploader("Select PDFs", type="pdf", accept_multiple_files=True)
+    scanned_mode = st.checkbox("📸 PDF is scanned (image only)?")
     run = st.button("📊 Extract & Index")
 
     st.header("🛠 Control")
@@ -233,7 +222,7 @@ if "msgs" not in st.session_state:
 if run and uploaded:
     st.session_state.msgs = []
     with st.spinner("Processing documents and building index..."):
-        st.session_state.vs = load_and_index(uploaded)
+        st.session_state.vs = load_and_index(uploaded, scanned_mode)
     if st.session_state.vs:
         st.session_state.msgs.append({"role": "assistant", "content": "Extraction & indexing done. Ask anything!"})
 
@@ -255,7 +244,6 @@ if query := st.chat_input("Ask about the PDF content or tables..."):
                 st.session_state.msgs.append({"role": "assistant", "content": resp})
     else:
         st.error("Please upload and process PDFs first to enable chat functionality.")
-
 
 
 
