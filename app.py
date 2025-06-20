@@ -1,4 +1,4 @@
-# --- Integrated Single-File Streamlit PDF QA App with Donut + LLM ---
+# app.py
 
 import os
 import tempfile
@@ -40,6 +40,8 @@ st.title("📄 PDF Text & Table Extractor + Chat QA")
 # --- Donut OCR setup ---
 donut_processor = DonutProcessor.from_pretrained("naver-clova-ix/donut-base")
 donut_model = VisionEncoderDecoderModel.from_pretrained("naver-clova-ix/donut-base")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+donut_model.to(device)
 donut_model.eval()
 
 # --- Helpers ---
@@ -81,7 +83,7 @@ def extract_donut_tables(pdf_path):
         for i, page in enumerate(doc):
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            pixel_values = donut_processor(images=img, return_tensors="pt").pixel_values
+            pixel_values = donut_processor(images=img, return_tensors="pt").pixel_values.to(device)
             with torch.no_grad():
                 output = donut_model.generate(pixel_values, max_length=512)
             prediction = donut_processor.batch_decode(output, skip_special_tokens=True)[0]
@@ -89,10 +91,11 @@ def extract_donut_tables(pdf_path):
                 try:
                     df = pd.read_json(prediction.replace("\n", "").strip())
                     dfs.append(clean_df(df))
-                except:
-                    logging.warning("Donut output couldn't be parsed as DataFrame")
+                except Exception as e:
+                    logging.warning(f"Donut output parsing failed: {e}")
     except Exception as e:
         logging.error(f"Donut OCR failed: {e}")
+        st.warning(f"⚠ Donut OCR failed on {os.path.basename(pdf_path)}: {e}")
     return dfs
 
 def extract_tables_with_llm(pdf_path, model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL):
@@ -112,7 +115,6 @@ Please extract all the tables from the following document and convert them to CS
 
 Only return CSV-formatted tables.
 """
-
     try:
         response = requests.post(
             url=f"{base_url}/api/generate",
@@ -129,7 +131,11 @@ Only return CSV-formatted tables.
 def extract_all_tables(pdf_path):
     dfs = extract_tables_pdfplumber(pdf_path)
     dfs += extract_tables_camelot(pdf_path)
-    dfs += extract_donut_tables(pdf_path)
+    donut_dfs = extract_donut_tables(pdf_path)
+    dfs += donut_dfs
+
+    if not dfs and not donut_dfs:
+        st.warning("⚠ No tables found using traditional methods or OCR.")
 
     llm_csv = extract_tables_with_llm(pdf_path)
     if not llm_csv.strip():
@@ -249,7 +255,6 @@ if query := st.chat_input("Ask about the PDF content or tables..."):
                 st.session_state.msgs.append({"role": "assistant", "content": resp})
     else:
         st.error("Please upload and process PDFs first to enable chat functionality.")
-
 
 
 
