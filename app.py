@@ -361,24 +361,21 @@
 
 
 
-# app.py
-import os, io, tempfile, shutil, logging, torch, fitz, csv, json
+import os, io, tempfile, shutil, csv, json, fitz, base64, traceback
 import streamlit as st
 from PIL import Image
 import pytesseract
 import pdfplumber
 import numpy as np
-import layoutparser as lp
-from difflib import SequenceMatcher
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.messages import HumanMessage, MediaMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage
 
 # SETTINGS
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -434,14 +431,15 @@ def build_index(files, is_scanned):
                 img_bytes = img_buffer.getvalue()
 
                 prompt = "Read the image and extract all text and tables (in CSV if present). Do not explain."
+
                 try:
-                    response = vision_llm.invoke([
-                        HumanMessage(content=prompt),
-                        MediaMessage(content=img_bytes, media_type="image/png")
-                    ])
+                    img_b64 = base64.b64encode(img_bytes).decode()
+                    img_md = f"![image](data:image/png;base64,{img_b64})"
+                    message = HumanMessage(content=f"{img_md}\n\n{prompt}")
+                    response = vision_llm.invoke(message)
                     raw_extracted.append(f"--- Page {i+1} ---\n{response.strip()}")
                 except Exception as e:
-                    st.warning(f"Error processing page {i+1} of {f.name}: {e}")
+                    st.warning(f"Error processing page {i+1} of {f.name}:\n{traceback.format_exc()}")
 
             full_content = "\n".join(raw_extracted)
 
@@ -450,7 +448,6 @@ Below is messy OCR and partial table data extracted from a scanned PDF document.
 Some tables may be split across pages or contain merged cells.
 Your task is to clean and stitch related tables together, and output each complete table in valid CSV format.
 Only output the cleaned tables in CSV. Do not explain.
-
 ---
 {full_content}
 ---
@@ -460,7 +457,7 @@ Cleaned Tables (CSV Only):
                 cleaned_output = cleaner_llm.invoke(clean_prompt)
                 all_docs.append(Document(page_content=cleaned_output, metadata={"source": f"{f.name}-cleaned"}))
             except Exception as e:
-                st.warning(f"Table cleaning failed for {f.name}: {e}")
+                st.warning(f"Table cleaning failed for {f.name}:\n{traceback.format_exc()}")
         else:
             texts, tables = extract_text_and_tables_pdfplumber(tmp_path)
 
@@ -473,8 +470,6 @@ Below are raw tables extracted from a digital PDF.
 Some tables may be split across pages or contain merged cells.
 Your task is to clean and merge any related or partial tables.
 Return all final tables in valid CSV format only. Do not explain.
-
-Tables from {f.name}:
 ---
 {raw_table_str}
 ---
@@ -484,7 +479,7 @@ Cleaned and Merged Tables (CSV Only):
                 stitched_csv = cleaner_llm.invoke(stitch_prompt)
                 all_docs.append(Document(page_content=stitched_csv, metadata={"source": f"{f.name}-cleaned"}))
             except Exception as e:
-                st.warning(f"Failed to stitch tables for {f.name}: {e}")
+                st.warning(f"Failed to stitch tables for {f.name}:\n{traceback.format_exc()}")
 
         os.remove(tmp_path)
 
