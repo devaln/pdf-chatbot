@@ -144,7 +144,7 @@ def extract_all_tables(pdf_path, scanned_mode=False):
         table_texts.append(f"Table {i+1}:\n{df.to_csv(index=False)}")
 
     st.subheader("LLM‑Structured Tables")
-    st.text(llm_csv)
+    # st.text(llm_csv)
     table_texts.append("LLM-Structured Tables:\n" + llm_csv)
 
     return "\n\n".join(table_texts), text
