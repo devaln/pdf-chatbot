@@ -361,11 +361,11 @@
 
 
 
-
 import os, io, tempfile, shutil, csv, json, fitz, traceback, base64
 import streamlit as st
 from PIL import Image
 import pdfplumber
+from concurrent.futures import ThreadPoolExecutor
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -413,6 +413,22 @@ def extract_text_and_tables_pdfplumber(path):
                     if t: tables.append(t)
     return texts, tables
 
+def process_scanned_page(i, img, fname):
+    try:
+        img_buffer = io.BytesIO()
+        img.save(img_buffer, format="PNG")
+        img_bytes = img_buffer.getvalue()
+        img_b64 = base64.b64encode(img_bytes).decode()
+
+        message = HumanMessage(content=[
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+            {"type": "text", "text": "Read the image and extract all text and tables (in CSV if present). Do not explain."}
+        ])
+        response = vision_llm.invoke([message])
+        return f"--- Page {i+1} ---\n{response.content.strip()}"
+    except Exception:
+        return f"Error processing page {i+1} of {fname}:\n{traceback.format_exc()}"
+
 def build_index(files, is_scanned):
     all_docs = []
     for f in files:
@@ -423,23 +439,10 @@ def build_index(files, is_scanned):
         st.write(f"Processing {f.name}...")
         if is_scanned:
             images = pdf_to_images(tmp_path)
-            raw_extracted = []
-
-            for i, img in enumerate(images):
-                try:
-                    img_buffer = io.BytesIO()
-                    img.save(img_buffer, format="PNG")
-                    img_bytes = img_buffer.getvalue()
-                    img_b64 = base64.b64encode(img_bytes).decode()
-
-                    message = HumanMessage(content=[
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
-                        {"type": "text", "text": "Read the image and extract all text and tables (in CSV if present). Do not explain."}
-                    ])
-                    response = vision_llm.invoke([message])
-                    raw_extracted.append(f"--- Page {i+1} ---\n{response.strip()}")
-                except Exception:
-                    st.warning(f"Error processing page {i+1} of {f.name}:\n{traceback.format_exc()}")
+            with st.spinner("Running OCR on scanned pages..."):
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    futures = [executor.submit(process_scanned_page, i, img, f.name) for i, img in enumerate(images)]
+                    raw_extracted = [future.result() for future in futures]
 
             full_content = "\n".join(raw_extracted)
             clean_prompt = f"""
