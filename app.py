@@ -362,7 +362,7 @@
 
 
 
-import os, io, tempfile, shutil, csv, json, fitz, traceback
+import os, io, tempfile, shutil, csv, json, fitz, traceback, base64
 import streamlit as st
 from PIL import Image
 import pdfplumber
@@ -409,7 +409,8 @@ def extract_text_and_tables_pdfplumber(path):
                 texts.append((i, text))
             extracted_tables = page.extract_tables()
             if extracted_tables:
-                tables.extend(extracted_tables)
+                for t in extracted_tables:
+                    if t: tables.append(t)
     return texts, tables
 
 def build_index(files, is_scanned):
@@ -425,24 +426,22 @@ def build_index(files, is_scanned):
             raw_extracted = []
 
             for i, img in enumerate(images):
-                img_buffer = io.BytesIO()
-                img.save(img_buffer, format="PNG")
-                img_bytes = img_buffer.getvalue()
-
-                prompt = "Read the image and extract all text and tables (in CSV if present). Do not explain."
-
                 try:
-                    message = [
-                        {"type": "image", "image": img_bytes},
-                        {"type": "text", "text": prompt}
-                    ]
-                    response = vision_llm.invoke(message)
+                    img_buffer = io.BytesIO()
+                    img.save(img_buffer, format="PNG")
+                    img_bytes = img_buffer.getvalue()
+                    img_b64 = base64.b64encode(img_bytes).decode()
+
+                    message = HumanMessage(content=[
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                        {"type": "text", "text": "Read the image and extract all text and tables (in CSV if present). Do not explain."}
+                    ])
+                    response = vision_llm.invoke([message])
                     raw_extracted.append(f"--- Page {i+1} ---\n{response.strip()}")
-                except Exception as e:
+                except Exception:
                     st.warning(f"Error processing page {i+1} of {f.name}:\n{traceback.format_exc()}")
 
             full_content = "\n".join(raw_extracted)
-
             clean_prompt = f"""
 Below is messy OCR and partial table data extracted from a scanned PDF document.
 Some tables may be split across pages or contain merged cells.
@@ -456,11 +455,11 @@ Cleaned Tables (CSV Only):
             try:
                 cleaned_output = cleaner_llm.invoke(clean_prompt)
                 all_docs.append(Document(page_content=cleaned_output, metadata={"source": f"{f.name}-cleaned"}))
-            except Exception as e:
+            except Exception:
                 st.warning(f"Table cleaning failed for {f.name}:\n{traceback.format_exc()}")
+
         else:
             texts, tables = extract_text_and_tables_pdfplumber(tmp_path)
-
             for idx, text in texts:
                 all_docs.append(Document(page_content=text, metadata={"source": f"{f.name}-p{idx}"}))
 
@@ -478,7 +477,7 @@ Cleaned and Merged Tables (CSV Only):
             try:
                 stitched_csv = cleaner_llm.invoke(stitch_prompt)
                 all_docs.append(Document(page_content=stitched_csv, metadata={"source": f"{f.name}-cleaned"}))
-            except Exception as e:
+            except Exception:
                 st.warning(f"Failed to stitch tables for {f.name}:\n{traceback.format_exc()}")
 
         os.remove(tmp_path)
@@ -525,6 +524,7 @@ with st.sidebar:
     if st.button("🧹 Clear Chat"):
         st.session_state.chat = []
 
+# --- CHAT INTERFACE ---
 if "vs" not in st.session_state: st.session_state.vs = None
 if "chat" not in st.session_state: st.session_state.chat = []
 
@@ -545,10 +545,10 @@ if query:
             with st.spinner("Thinking..."):
                 try:
                     chain = get_rag_chain(st.session_state.vs)
-                    answer = chain.invoke(query)
+                    answer = chain.invoke({"question": query})
                     st.markdown(answer)
                     st.session_state.chat.append({"role": "assistant", "content": answer})
-                except Exception as e:
+                except Exception:
                     st.error("❌ Error answering your query:\n" + traceback.format_exc())
     else:
         st.info("⚠ Please build an index from a PDF before chatting.")
