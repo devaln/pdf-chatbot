@@ -199,11 +199,15 @@ def clear_db():
 
 # --- Sidebar ---
 with st.sidebar:
+    st.image("img/ACL_Digital.png", width=180)
+    st.image("img/Cipla_Foundation.png", width=180)
+    st.markdown(""" <hr> """, unsafe_allow_html=True)
     st.header("📂 Upload PDFs")
     uploaded = st.file_uploader("Select PDFs", type="pdf", accept_multiple_files=True)
     scanned_mode = st.checkbox("📸 PDF is scanned (image only)?")
     run = st.button("📊 Extract & Index")
 
+    st.markdown(""" <hr> """, unsafe_allow_html=True)
     st.header("🛠 Control")
     if st.button("🗑 Clear DB"):
         clear_db()
