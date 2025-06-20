@@ -374,6 +374,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.messages import HumanMessage, MediaMessage
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OllamaEmbeddings
@@ -434,7 +435,10 @@ def build_index(files, is_scanned):
 
                 prompt = "Read the image and extract all text and tables (in CSV if present). Do not explain."
                 try:
-                    response = vision_llm.invoke({"prompt": prompt, "image": img_bytes})
+                    response = vision_llm.invoke([
+                        HumanMessage(content=prompt),
+                        MediaMessage(content=img_bytes, media_type="image/png")
+                    ])
                     raw_extracted.append(f"--- Page {i+1} ---\n{response.strip()}")
                 except Exception as e:
                     st.warning(f"Error processing page {i+1} of {f.name}: {e}")
