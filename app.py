@@ -102,7 +102,7 @@ Only return CSV-formatted tables."""
         csv_text = result.get("response", "")
 
         st.subheader("LLM‑Structured Tables from OCR")
-        st.text(csv_text)
+        # st.text(csv_text)
         return csv_text, full_text
     except Exception as e:
         logging.error(f"OCR + LLM extraction failed: {e}")
