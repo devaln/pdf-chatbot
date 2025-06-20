@@ -36,6 +36,14 @@ DB_DIR = "./faiss_db"
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
 st.set_page_config(page_title="PDF QA with Tables", layout="wide")
+st.markdown("""
+    <style>
+        section[data-testid="stSidebar"] {
+            background-color: white !important;
+            border-right: 2px solid #e0e0e0 !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 st.title("\U0001F4C4 PDF Text & Table Extractor + Chat QA")
 
 # --- Helpers ---
