@@ -158,10 +158,10 @@ def load_and_index(files, scanned_mode=False):
             with open(path, "wb") as f:
                 f.write(file.getbuffer())
             try:
-                st.info(f"📄 Loading {file.name}...")
+                # st.info(f"📄 Loading {file.name}...")
                 loader = PyPDFLoader(path)
                 all_docs.extend(loader.load())
-                st.info("🔍 Extracting tables...")
+                # st.info("🔍 Extracting tables...")
                 text_csv, raw_text = extract_all_tables(path, scanned_mode)
                 all_docs.append(Document(page_content=text_csv + "\n" + raw_text, metadata={"source": file.name}))
             except Exception as e:
