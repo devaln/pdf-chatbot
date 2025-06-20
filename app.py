@@ -361,12 +361,11 @@
 
 
 
-import os, io, tempfile, shutil, csv, json, fitz, base64, traceback
+
+import os, io, tempfile, shutil, csv, json, fitz, traceback
 import streamlit as st
 from PIL import Image
-import pytesseract
 import pdfplumber
-import numpy as np
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -433,9 +432,10 @@ def build_index(files, is_scanned):
                 prompt = "Read the image and extract all text and tables (in CSV if present). Do not explain."
 
                 try:
-                    img_b64 = base64.b64encode(img_bytes).decode()
-                    img_md = f"![image](data:image/png;base64,{img_b64})"
-                    message = HumanMessage(content=f"{img_md}\n\n{prompt}")
+                    message = [
+                        {"type": "image", "image": img_bytes},
+                        {"type": "text", "text": prompt}
+                    ]
                     response = vision_llm.invoke(message)
                     raw_extracted.append(f"--- Page {i+1} ---\n{response.strip()}")
                 except Exception as e:
@@ -512,7 +512,8 @@ with st.sidebar:
     if col1.button("🔄 Build Index") and files:
         with st.spinner("Indexing..."):
             st.session_state.vs = build_index(files, scanned)
-            st.session_state.chat = [{"role": "assistant", "content": "Index created. Ask your questions!"}]
+            if st.session_state.vs:
+                st.session_state.chat = [{"role": "assistant", "content": "Index created. Ask your questions!"}]
         st.success("Index built.")
         st.rerun()
 
@@ -534,16 +535,20 @@ if st.session_state.vs is None and os.path.exists(DB_DIR):
 for msg in st.session_state.chat:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-if query := st.chat_input("Ask a question about your PDFs..."):
+query = st.chat_input("Ask a question about your PDFs...")
+if query:
     st.chat_message("user").markdown(query)
     st.session_state.chat.append({"role": "user", "content": query})
 
     if st.session_state.vs:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                chain = get_rag_chain(st.session_state.vs)
-                answer = chain.invoke(query)
-                st.markdown(answer)
-        st.session_state.chat.append({"role": "assistant", "content": answer})
+                try:
+                    chain = get_rag_chain(st.session_state.vs)
+                    answer = chain.invoke(query)
+                    st.markdown(answer)
+                    st.session_state.chat.append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error("❌ Error answering your query:\n" + traceback.format_exc())
     else:
-        st.error("Please build the index first.")
+        st.info("⚠ Please build an index from a PDF before chatting.")
