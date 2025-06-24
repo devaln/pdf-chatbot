@@ -463,3 +463,22 @@ with st.sidebar:
                     os.remove(os.path.join(CHAT_DIR, f))
             st.success("All chat history cleared.")
             st.rerun()
+
+# --- Custom Retrieval Wrapper ---
+def get_chat_chain(vs):
+    def custom_retriever(question):
+        docs = vs.similarity_search(question, k=5)
+        sources = list({doc.metadata.get("source", "Unknown") for doc in docs})
+        context = "\n\n".join([doc.page_content for doc in docs])
+        return context, sources
+
+    prompt = ChatPromptTemplate.from_template("You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
+    llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
+
+    def chain_fn(question):
+        context, sources = custom_retriever(question)
+        chain = ({"context": lambda _: context, "question": lambda _: question} | prompt | llm | StrOutputParser())
+        answer = chain.invoke(question)
+        return answer, sources
+
+    return chain_fn
