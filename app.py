@@ -499,7 +499,17 @@ def load_existing_index():
         return None
 
 def get_chat_chain(vs):
-    prompt = ChatPromptTemplate.from_template("You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
+    prompt = ChatPromptTemplate.from_template(
+        """You are a helpful assistant with expert understanding of tables and PDF content.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Important: Do not include any document IDs, metadata, or source references (like Document(id=...) or file names) in your answer. Only provide the direct answer."""
+    )
     llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
     return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
 
@@ -507,8 +517,6 @@ def clear_db():
     if os.path.exists(DB_DIR):
         shutil.rmtree(DB_DIR)
         logging.info(f"FAISS DB directory '{DB_DIR}' cleared.")
-
-        # (Everything before is same as your code — unchanged imports/config)
 
 # --- Sidebar ---
 with st.sidebar:
@@ -530,21 +538,21 @@ with st.sidebar:
     if st.button("🧹 Clear Chat"):
         st.session_state.msgs = []
         st.success("Chat cleared")
-    if st.button("🧨 Clear All Chat History"):
-        for f in os.listdir(CHAT_DIR):
-            os.remove(os.path.join(CHAT_DIR, f))
-        st.success("All chat histories deleted")
+    if st.button("🗑 Clear All Chat History"):
+        for file in os.listdir(CHAT_DIR):
+            if file.endswith(".json"):
+                os.remove(os.path.join(CHAT_DIR, file))
+        st.success("All chat histories deleted.")
+        st.rerun()
 
     st.markdown("""<hr>""", unsafe_allow_html=True)
-    st.markdown("<h3 style='margin-bottom:0.5rem;'>💬 Chat History</h3>", unsafe_allow_html=True)
+    st.header("💬 Chat History")
     os.makedirs(CHAT_DIR, exist_ok=True)
 
     def summarize_chat(msgs):
         for msg in msgs:
             if msg["role"] == "user" and msg["content"].strip():
-                summary = msg["content"].strip().split("\n")[0]
-                cleaned = "_".join(summary.strip().split()[:5])
-                return cleaned.lower().replace("?", "").replace(":", "")
+                return "_".join(msg["content"].strip().split()[:5]).lower()
         return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     if "chat_id" not in st.session_state:
@@ -567,9 +575,9 @@ with st.sidebar:
         reverse=True
     )[:10]
 
-    for i, fname in enumerate(session_files):
-        label = fname.replace(".json", "").replace("_", " ")[:50].title()
-        if st.button(f"💬 {label}", key=f"chat_{i}"):
+    for fname in session_files:
+        label = fname.replace(".json", "").replace("_", " ").title()
+        if st.button(f"💬 {label}", key=f"history_{fname}"):
             st.session_state.chat_id = fname.replace(".json", "")
             with open(os.path.join(CHAT_DIR, fname), "r") as f:
                 st.session_state.msgs = json.load(f)
