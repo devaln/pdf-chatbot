@@ -385,7 +385,7 @@ with st.sidebar:
     st.markdown("""<hr>""", unsafe_allow_html=True)
     st.header("🛠 Control")
     if st.button("🗑 Clear DB"):
-        clear_db()
+        clear_db() # type: ignore
         st.session_state.vs = None
         st.success("DB cleared")
     if st.button("🧹 Clear Chat"):
@@ -438,19 +438,19 @@ with st.sidebar:
                     st.session_state.chat_id = fname.replace(".json", "")
                     with open(os.path.join(CHAT_DIR, fname), "r") as f:
                         st.session_state.msgs = json.load(f)
-                    st.session_state.vs = load_existing_index()
+                    st.session_state.vs = load_existing_index() # type: ignore
                     st.rerun()
 
 # --- Main ---
 if "vs" not in st.session_state:
-    st.session_state.vs = load_existing_index()
+    st.session_state.vs = load_existing_index() # type: ignore
 if "msgs" not in st.session_state:
     st.session_state.msgs = []
 
 if run and uploaded:
     st.session_state.msgs = []
     with st.spinner("Processing documents and building index..."):
-        st.session_state.vs = load_and_index(uploaded, scanned_mode)
+        st.session_state.vs = load_and_index(uploaded, scanned_mode) # type: ignore
     if st.session_state.vs:
         st.session_state.msgs.append({"role": "assistant", "content": "Extraction & indexing done. Ask anything!"})
 
@@ -464,7 +464,7 @@ if query := st.chat_input("Ask about the PDF content or tables..."):
         st.markdown(query)
 
     if st.session_state.vs:
-        chain = get_chat_chain(st.session_state.vs)
+        chain = get_chat_chain(st.session_state.vs) # type: ignore
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 raw_resp = "".join(chain.stream(query))
