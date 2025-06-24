@@ -281,7 +281,6 @@ from pdf2image import convert_from_path
 from io import StringIO
 from difflib import SequenceMatcher
 from datetime import datetime
-import requests
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -306,7 +305,7 @@ CHAT_AUTOSAVE = "chat_autosave.json"
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
 st.set_page_config(page_title="PDF QA with Tables", layout="wide")
-st.title("📄 PDF QA + Intelligent Table Analysis")
+st.title("\U0001F4C4 PDF QA + Intelligent Table Analysis")
 
 # --- Utilities ---
 def similar(a, b):
@@ -343,8 +342,8 @@ def extract_scanned_pdf_with_ocr(pdf_path):
             data = data[data.conf != '-1']
             data["line"] = (data.top.diff().abs() > 10).cumsum()
             grouped = data.groupby("line")
-            rows = ["".join(g.sort_values("left")["text"]) for _, g in grouped]
-            all_dfs.append(pd.DataFrame([r.split(",") for r in rows if len(r.split(",")) > 1]))
+            rows = [" ".join(g.sort_values("left")["text"]) for _, g in grouped if len(g["text"].dropna()) > 1]
+            all_dfs.append(pd.DataFrame([r.split() for r in rows if len(r.split()) > 1]))
             full_text += pytesseract.image_to_string(img)
         tables = stitch_tables(all_dfs)
         all_csvs = "\n\n".join([df.to_csv(index=False) for df in tables])
@@ -390,19 +389,16 @@ def load_and_index(files, scanned_mode=False):
     all_chunks = []
     with tempfile.TemporaryDirectory() as td:
         for file in files:
-            st.info(f"📄 Processing {file.name}...")
             path = os.path.join(td, file.name)
             with open(path, "wb") as f:
                 f.write(file.getbuffer())
-            loader = PyPDFLoader(path)
-            pages = loader.load()
             if scanned_mode:
                 csv_text, raw_text = extract_scanned_pdf_with_ocr(path)
-                if not csv_text:
-                    st.warning(f"⚠ OCR/LLM failed for {file.name}. Please check file quality.")
                 chunks = create_agentic_chunks_from_csv(csv_text, file.name)
                 all_chunks.extend(chunks)
             else:
+                loader = PyPDFLoader(path)
+                pages = loader.load()
                 all_chunks.extend(pages)
     if not all_chunks:
         st.warning("No chunks created.")
@@ -412,7 +408,7 @@ def load_and_index(files, scanned_mode=False):
         embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
         vs = FAISS.from_documents(chunks, embeddings)
         vs.save_local(DB_DIR)
-        st.success("✅ PDFs indexed and ready for Q&A!")
+        st.success("✅ Indexed successfully!")
         return vs
     except Exception as e:
         st.error(f"Indexing failed: {e}")
@@ -429,19 +425,19 @@ def get_chat_chain(vs):
     llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
     return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
 
-# --- Sidebar UI ---
+# --- Sidebar ---
 with st.sidebar:
     uploaded = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
     scanned_mode = st.checkbox("Scanned PDF (image-based)?")
-    start_indexing = st.button("Extract & Index")
-
+    if st.button("Extract & Index"):
+        st.session_state.vs = load_and_index(uploaded, scanned_mode)
     if st.button("Clear DB"):
         if os.path.exists(DB_DIR): shutil.rmtree(DB_DIR)
         st.session_state.vs = None
         st.success("DB cleared.")
 
     st.markdown("---")
-    st.subheader("💬 Chat Sessions")
+    st.subheader("\U0001F4AC Chat Sessions")
     sessions = load_chat_sessions()
     if sessions:
         for s in sessions[::-1][:5]:
@@ -451,11 +447,6 @@ with st.sidebar:
         if st.session_state.get("msgs"):
             save_chat_session(str(uuid.uuid4()), st.session_state.msgs)
         st.session_state.msgs = []
-
-# --- Index Trigger ---
-if start_indexing and uploaded:
-    with st.spinner("Extracting and indexing..."):
-        st.session_state.vs = load_and_index(uploaded, scanned_mode)
 
 # --- Chat State Init ---
 if "vs" not in st.session_state:
