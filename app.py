@@ -267,7 +267,6 @@
 
 
 
-
 import os
 import tempfile
 import shutil
@@ -358,8 +357,7 @@ def extract_scanned_pdf_with_ocr(pdf_path):
             text = pytesseract.image_to_string(img)
             full_text += text + "\n"
 
-        llm_prompt = f"""You are a table understanding expert.
-Extract all tables from the following OCR text and convert them to CSV format:
+        llm_prompt = f"""You are a table understanding expert. Extract all tables from the following OCR text and convert them to CSV format:
 
 {full_text}
 
@@ -473,13 +471,14 @@ def clear_db():
 with st.sidebar:
     st.image("img/ACL_Digital.png", width=180)
     st.image("img/Cipla_Foundation.png", width=180)
-    st.markdown(""" <hr> """, unsafe_allow_html=True)
+    st.markdown("""<hr>""", unsafe_allow_html=True)
+
     st.header("📂 Upload PDFs")
     uploaded = st.file_uploader("Select PDFs", type="pdf", accept_multiple_files=True)
     scanned_mode = st.checkbox("📸 PDF is scanned (image only)?")
     run = st.button("📊 Extract & Index")
 
-    st.markdown(""" <hr> """, unsafe_allow_html=True)
+    st.markdown("""<hr>""", unsafe_allow_html=True)
     st.header("🛠 Control")
     if st.button("🗑 Clear DB"):
         clear_db()
@@ -489,17 +488,27 @@ with st.sidebar:
         st.session_state.msgs = []
         st.success("Chat cleared")
 
-    st.markdown(""" <hr> """, unsafe_allow_html=True)
-    st.header("💬 Chat Sessions")
+    st.markdown("""<hr>""", unsafe_allow_html=True)
+    st.header("💬 Chat History")
     os.makedirs(CHAT_DIR, exist_ok=True)
 
+    def summarize_chat(msgs):
+        for msg in msgs:
+            if msg["role"] == "user" and msg["content"].strip():
+                first_line = msg["content"].strip().split("\n")[0]
+                summary = first_line.strip()[:40].replace(" ", "_").replace("?", "").replace(":", "")
+                return summary.lower()
+        return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     if "chat_id" not in st.session_state:
-        st.session_state.chat_id = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+        base = summarize_chat(st.session_state.get("msgs", []))
+        st.session_state.chat_id = f"{base}_{uuid.uuid4().hex[:4]}"
         with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
             json.dump([], f)
 
     if st.button("➕ New Chat"):
-        st.session_state.chat_id = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+        base = summarize_chat(st.session_state.get("msgs", []))
+        st.session_state.chat_id = f"{base}_{uuid.uuid4().hex[:4]}"
         st.session_state.msgs = []
         with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
             json.dump([], f)
@@ -512,11 +521,12 @@ with st.sidebar:
     )[:10]
 
     for fname in session_files:
-        label = fname.replace(".json", "")
+        label = fname.replace(".json", "").replace("_", " ").title()
         if st.button(f"💬 {label}"):
-            st.session_state.chat_id = label
+            st.session_state.chat_id = fname.replace(".json", "")
             with open(os.path.join(CHAT_DIR, fname), "r") as f:
                 st.session_state.msgs = json.load(f)
+            st.session_state.vs = load_existing_index()  # ✅ Fix: Reload vector index
             st.rerun()
 
 # --- Main ---
