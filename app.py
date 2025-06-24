@@ -458,34 +458,9 @@ def load_existing_index():
         return None
 
 def get_chat_chain(vs):
-    prompt = ChatPromptTemplate.from_template("""
-You are a table analysis expert.
-
-Context:
-{context}
-
-Question: {question}
-
-Answer (include the document names in your answer summary if the answer is based on multiple documents):
-""")
-
+    prompt = ChatPromptTemplate.from_template("You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
     llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
-
-    def custom_output_parser(output, docs):
-        sources = list({doc.metadata.get("source", "Unknown") for doc in docs})
-        sources_str = ", ".join(sources)
-        return f"{output.strip()}\n\n*Source documents*: {sources_str}"
-
-    class SourceAwareOutputParser:
-        def invoke(self, input, config=None):
-            docs = input.get("context", [])
-            output = input["output"]
-            return custom_output_parser(output, docs)
-
-    return {
-        "context": vs.as_retriever(return_source_documents=True),
-        "question": RunnablePassthrough()
-    } | prompt | llm | SourceAwareOutputParser()
+    return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
 
 def clear_db():
     if os.path.exists(DB_DIR):
@@ -517,18 +492,12 @@ with st.sidebar:
     st.header("💬 Chat History")
     os.makedirs(CHAT_DIR, exist_ok=True)
 
-    if st.button("🛑 Clear All History"):
-        for f in os.listdir(CHAT_DIR):
-            if f.endswith(".json"):
-                os.remove(os.path.join(CHAT_DIR, f))
-        st.success("All chat history deleted.")
-        st.rerun()
-
     def summarize_chat(msgs):
         for msg in msgs:
             if msg["role"] == "user" and msg["content"].strip():
-                first_words = "_".join(msg["content"].strip().split()[:5])
-                return first_words.lower().replace("?", "").replace(":", "")
+                first_line = msg["content"].strip().split("\n")[0]
+                summary = first_line.strip()[:40].replace(" ", "_").replace("?", "").replace(":", "")
+                return summary.lower()
         return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     if "chat_id" not in st.session_state:
@@ -557,7 +526,7 @@ with st.sidebar:
             st.session_state.chat_id = fname.replace(".json", "")
             with open(os.path.join(CHAT_DIR, fname), "r") as f:
                 st.session_state.msgs = json.load(f)
-            st.session_state.vs = load_existing_index()
+            st.session_state.vs = load_existing_index()  # ✅ Fix: Reload vector index
             st.rerun()
 
 # --- Main ---
@@ -586,12 +555,13 @@ if query := st.chat_input("Ask about the PDF content or tables..."):
         chain = get_chat_chain(st.session_state.vs)
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                resp = chain.invoke({"question": query})
+                resp = "".join(chain.stream(query))
                 st.markdown(resp)
                 st.session_state.msgs.append({"role": "assistant", "content": resp})
     else:
         st.error("Please upload and process PDFs first to enable chat functionality.")
 
+# --- Save Chat ---
 if "chat_id" in st.session_state:
     with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
         json.dump(st.session_state.msgs, f)
