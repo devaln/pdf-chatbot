@@ -307,7 +307,6 @@
 
 
 
-
 import os
 import tempfile
 import shutil
@@ -325,7 +324,7 @@ import pytesseract
 from pdf2image import convert_from_path
 import json
 import uuid
-import re  # ✅ ADDED
+import re
 from datetime import datetime
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -529,8 +528,7 @@ with st.sidebar:
     if st.button("🧹 Clear Chat"):
         st.session_state.msgs = []
         st.success("Chat cleared")
-
-    if st.button("🗑 Clear All Chat History"):  # ✅ ADDED
+    if st.button("🗑 Clear All Chat History"):
         for f in os.listdir(CHAT_DIR):
             if f.endswith(".json"):
                 os.remove(os.path.join(CHAT_DIR, f))
@@ -560,9 +558,9 @@ with st.sidebar:
     def summarize_chat(msgs):
         for msg in msgs:
             if msg["role"] == "user" and msg["content"].strip():
-                first_line = msg["content"].strip().split("\n")[0]
-                summary = first_line.strip()[:40].replace(" ", "_").replace("?", "").replace(":", "")
-                return summary.lower()
+                words = msg["content"].strip().split()
+                summary = "_".join(words[:5]).lower()
+                return summary.replace("?", "").replace(":", "").replace("/", "_")
         return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     if "chat_id" not in st.session_state:
@@ -586,12 +584,19 @@ with st.sidebar:
     )[:10]
 
     for fname in session_files:
-        label = fname.replace(".json", "").replace("_", " ").title()
+        chat_path = os.path.join(CHAT_DIR, fname)
+        try:
+            with open(chat_path, "r") as f:
+                data = json.load(f)
+            title = summarize_chat(data)
+        except Exception:
+            title = fname.replace(".json", "")
+        label = f"{title.title()}"
         with st.container():
             st.markdown('<div class="chat-history-btn">', unsafe_allow_html=True)
             if st.button(f"💬 {label}"):
                 st.session_state.chat_id = fname.replace(".json", "")
-                with open(os.path.join(CHAT_DIR, fname), "r") as f:
+                with open(chat_path, "r") as f:
                     st.session_state.msgs = json.load(f)
                 st.session_state.vs = load_existing_index()
                 st.rerun()
@@ -624,7 +629,10 @@ if query := st.chat_input("Ask about the PDF content or tables..."):
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 resp = "".join(chain.stream(query))
-                cleaned_resp = re.sub(r"\(Document\(id='[^']+'\)\)", "", resp)  # ✅ ADDED
+                cleaned_resp = re.sub(r"\(Document\(id='[^']+'\)\)", "", resp)
+                cleaned_resp = re.sub(r"(?i)(from|in|of)?\s*document\s*[0-9a-zA-Z\-_:]*", "", cleaned_resp)
+                cleaned_resp = re.sub(r"\s+page_content='.*?'", "", cleaned_resp)
+                cleaned_resp = re.sub(r"\s+", " ", cleaned_resp).strip()
                 st.markdown(cleaned_resp)
                 st.session_state.msgs.append({"role": "assistant", "content": cleaned_resp})
     else:
