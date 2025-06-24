@@ -299,9 +299,7 @@
 
 
 
-
-
-# app.py
+# app.py (OCR-only, no Donut)
 
 import os
 import tempfile
@@ -318,9 +316,6 @@ import torch
 import requests
 import pytesseract
 from pdf2image import convert_from_path
-import json
-import uuid
-from datetime import datetime
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -338,7 +333,6 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_LLM_MODEL = "llama3:latest"
 OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
 DB_DIR = "./faiss_db"
-CHAT_DIR = "./chat_sessions"
 
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -348,19 +342,6 @@ st.markdown("""
         section[data-testid="stSidebar"] {
             background-color: white !important;
             border-right: 2px solid #e0e0e0 !important;
-        }
-        .chat-history-button {
-            border: none;
-            background: none;
-            text-align: left;
-            padding: 0.4rem 0;
-            font-size: 0.95rem;
-            color: #1a1a1a;
-            cursor: pointer;
-            width: 100%;
-        }
-        .chat-history-button:hover {
-            color: #0258d0;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -406,7 +387,8 @@ def extract_scanned_pdf_with_ocr(pdf_path):
             text = pytesseract.image_to_string(img)
             full_text += text + "\n"
 
-        llm_prompt = f"""You are a table understanding expert. Extract all tables from the following OCR text and convert them to CSV format:
+        llm_prompt = f"""You are a table understanding expert.
+Extract all tables from the following OCR text and convert them to CSV format:
 
 {full_text}
 
@@ -419,6 +401,9 @@ Only return CSV-formatted tables."""
         )
         result = response.json()
         csv_text = result.get("response", "")
+
+        # st.subheader("LLM‑Structured Tables from OCR")
+        # st.text(csv_text)
         return csv_text, full_text
     except Exception as e:
         logging.error(f"OCR + LLM extraction failed: {e}")
@@ -459,7 +444,10 @@ def extract_all_tables(pdf_path, scanned_mode=False):
         st.dataframe(df)
         table_texts.append(f"Table {i+1}:\n{df.to_csv(index=False)}")
 
+    # st.subheader("LLM‑Structured Tables")
+    # st.text(llm_csv)
     table_texts.append("LLM-Structured Tables:\n" + llm_csv)
+
     return "\n\n".join(table_texts), text
 
 @st.cache_resource(show_spinner=False)
@@ -471,8 +459,10 @@ def load_and_index(files, scanned_mode=False):
             with open(path, "wb") as f:
                 f.write(file.getbuffer())
             try:
+                # st.info(f"📄 Loading {file.name}...")
                 loader = PyPDFLoader(path)
                 all_docs.extend(loader.load())
+                # st.info("🔍 Extracting tables...")
                 text_csv, raw_text = extract_all_tables(path, scanned_mode)
                 all_docs.append(Document(page_content=text_csv + "\n" + raw_text, metadata={"source": file.name}))
             except Exception as e:
@@ -520,14 +510,13 @@ def clear_db():
 with st.sidebar:
     st.image("img/ACL_Digital.png", width=180)
     st.image("img/Cipla_Foundation.png", width=180)
-    st.markdown("""<hr>""", unsafe_allow_html=True)
-
+    st.markdown(""" <hr> """, unsafe_allow_html=True)
     st.header("📂 Upload PDFs")
     uploaded = st.file_uploader("Select PDFs", type="pdf", accept_multiple_files=True)
     scanned_mode = st.checkbox("📸 PDF is scanned (image only)?")
     run = st.button("📊 Extract & Index")
 
-    st.markdown("""<hr>""", unsafe_allow_html=True)
+    st.markdown(""" <hr> """, unsafe_allow_html=True)
     st.header("🛠 Control")
     if st.button("🗑 Clear DB"):
         clear_db()
@@ -537,49 +526,7 @@ with st.sidebar:
         st.session_state.msgs = []
         st.success("Chat cleared")
 
-    st.markdown("""<hr>""", unsafe_allow_html=True)
-    st.header("💬 Chat History")
-    os.makedirs(CHAT_DIR, exist_ok=True)
-
-    def summarize_chat(msgs):
-        for msg in msgs:
-            if msg["role"] == "user" and msg["content"].strip():
-                words = msg["content"].strip().split()
-                return " ".join(words[:5]).strip().lower()
-        return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    if st.button("➕ New Chat"):
-        base = summarize_chat(st.session_state.get("msgs", []))
-        st.session_state.chat_id = f"{base}_{uuid.uuid4().hex[:4]}"
-        st.session_state.msgs = []
-        with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-            json.dump([], f)
-        st.rerun()
-
-    if st.button("🗑 Clear All History"):
-        for f in os.listdir(CHAT_DIR):
-            if f.endswith(".json"):
-                os.remove(os.path.join(CHAT_DIR, f))
-        st.success("All chat history cleared!")
-        st.rerun()
-
-    session_files = sorted(
-        [f for f in os.listdir(CHAT_DIR) if f.endswith(".json")],
-        key=lambda x: os.path.getmtime(os.path.join(CHAT_DIR, x)),
-        reverse=True
-    )
-
-    for i, fname in enumerate(session_files):
-        with open(os.path.join(CHAT_DIR, fname), "r") as f:
-            msgs = json.load(f)
-        label = summarize_chat(msgs)
-        if st.button(f"💬 {label.title()}", key=f"chat_{i}", use_container_width=True):
-            st.session_state.chat_id = fname.replace(".json", "")
-            st.session_state.msgs = msgs
-            st.session_state.vs = load_existing_index()
-            st.rerun()
-
-# --- Main Chat Logic ---
+# --- Main ---
 if "vs" not in st.session_state:
     st.session_state.vs = load_existing_index()
 if "msgs" not in st.session_state:
@@ -610,7 +557,3 @@ if query := st.chat_input("Ask about the PDF content or tables..."):
                 st.session_state.msgs.append({"role": "assistant", "content": resp})
     else:
         st.error("Please upload and process PDFs first to enable chat functionality.")
-
-if "chat_id" in st.session_state:
-    with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-        json.dump(st.session_state.msgs, f)
