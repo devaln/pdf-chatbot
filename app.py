@@ -446,122 +446,20 @@ def load_and_index(files, scanned_mode=False):
         st.error(f"FAISS indexing error: {e}")
         return None
 
-def load_existing_index():
-    if not os.path.exists(DB_DIR):
-        return None
-    try:
-        embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
-        return FAISS.load_local(DB_DIR, embeddings, allow_dangerous_deserialization=True)
-    except Exception as e:
-        logging.error(f"Failed to load existing FAISS DB: {e}")
-        st.error(f"Failed to load existing FAISS DB: {e}")
-        return None
+def summarize_chat(msgs):
+    for msg in msgs:
+        if msg["role"] == "user" and msg["content"].strip():
+            words = msg["content"].strip().split()
+            summary = "_".join(words[:5]).replace("?", "").replace(":", "")
+            return summary.lower()
+    return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-def get_chat_chain(vs):
-    prompt = ChatPromptTemplate.from_template("You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
-    llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
-    return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
-
-def clear_db():
-    if os.path.exists(DB_DIR):
-        shutil.rmtree(DB_DIR)
-        logging.info(f"FAISS DB directory '{DB_DIR}' cleared.")
-
-# --- Sidebar ---
 with st.sidebar:
-    st.image("img/ACL_Digital.png", width=180)
-    st.image("img/Cipla_Foundation.png", width=180)
     st.markdown("""<hr>""", unsafe_allow_html=True)
-
-    st.header("📂 Upload PDFs")
-    uploaded = st.file_uploader("Select PDFs", type="pdf", accept_multiple_files=True)
-    scanned_mode = st.checkbox("📸 PDF is scanned (image only)?")
-    run = st.button("📊 Extract & Index")
-
-    st.markdown("""<hr>""", unsafe_allow_html=True)
-    st.header("🛠 Control")
-    if st.button("🗑 Clear DB"):
-        clear_db()
-        st.session_state.vs = None
-        st.success("DB cleared")
-    if st.button("🧹 Clear Chat"):
-        st.session_state.msgs = []
-        st.success("Chat cleared")
-
-    st.markdown("""<hr>""", unsafe_allow_html=True)
-    st.header("💬 Chat History")
-    os.makedirs(CHAT_DIR, exist_ok=True)
-
-    def summarize_chat(msgs):
-        for msg in msgs:
-            if msg["role"] == "user" and msg["content"].strip():
-                first_line = msg["content"].strip().split("\n")[0]
-                summary = first_line.strip()[:40].replace(" ", "_").replace("?", "").replace(":", "")
-                return summary.lower()
-        return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    if "chat_id" not in st.session_state:
-        base = summarize_chat(st.session_state.get("msgs", []))
-        st.session_state.chat_id = f"{base}_{uuid.uuid4().hex[:4]}"
-        with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-            json.dump([], f)
-
-    if st.button("➕ New Chat"):
-        base = summarize_chat(st.session_state.get("msgs", []))
-        st.session_state.chat_id = f"{base}_{uuid.uuid4().hex[:4]}"
-        st.session_state.msgs = []
-        with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-            json.dump([], f)
-        st.rerun()
-
-    session_files = sorted(
-        [f for f in os.listdir(CHAT_DIR) if f.endswith(".json")],
-        key=lambda x: os.path.getmtime(os.path.join(CHAT_DIR, x)),
-        reverse=True
-    )[:10]
-
-    for fname in session_files:
-        label = fname.replace(".json", "").replace("_", " ").title()
-        if st.button(f"💬 {label}"):
-            st.session_state.chat_id = fname.replace(".json", "")
-            with open(os.path.join(CHAT_DIR, fname), "r") as f:
-                st.session_state.msgs = json.load(f)
-            st.session_state.vs = load_existing_index()  # ✅ Fix: Reload vector index
+    with st.expander("⚠ Clear All Chat History"):
+        if st.button("Yes, delete all chat history"):
+            for f in os.listdir(CHAT_DIR):
+                if f.endswith(".json"):
+                    os.remove(os.path.join(CHAT_DIR, f))
+            st.success("All chat history cleared.")
             st.rerun()
-
-# --- Main ---
-if "vs" not in st.session_state:
-    st.session_state.vs = load_existing_index()
-if "msgs" not in st.session_state:
-    st.session_state.msgs = []
-
-if run and uploaded:
-    st.session_state.msgs = []
-    with st.spinner("Processing documents and building index..."):
-        st.session_state.vs = load_and_index(uploaded, scanned_mode)
-    if st.session_state.vs:
-        st.session_state.msgs.append({"role": "assistant", "content": "Extraction & indexing done. Ask anything!"})
-
-for msg in st.session_state.msgs:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-if query := st.chat_input("Ask about the PDF content or tables..."):
-    st.session_state.msgs.append({"role": "user", "content": query})
-    with st.chat_message("user"):
-        st.markdown(query)
-
-    if st.session_state.vs:
-        chain = get_chat_chain(st.session_state.vs)
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                resp = "".join(chain.stream(query))
-                st.markdown(resp)
-                st.session_state.msgs.append({"role": "assistant", "content": resp})
-    else:
-        st.error("Please upload and process PDFs first to enable chat functionality.")
-
-# --- Save Chat ---
-if "chat_id" in st.session_state:
-    with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-        json.dump(st.session_state.msgs, f)
