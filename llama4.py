@@ -257,15 +257,15 @@
 
 
 
+# --- Imports ---
 import os
 import tempfile
 import shutil
 import logging
 import streamlit as st
 import pandas as pd
-import numpy as np
 from PIL import Image
-import fitz
+import fitz  # PyMuPDF
 import pdfplumber
 import camelot
 import pytesseract
@@ -293,6 +293,7 @@ logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s 
 st.set_page_config(page_title="PDF QA with Tables", layout="wide")
 st.title("📄 PDF Text & Table Extractor + Chat QA")
 
+# --- Utility Functions ---
 def clean_df(df):
     df.columns = pd.io.parsers.ParserBase({'names': df.columns})._maybe_dedup_names(df.columns)
     return df.fillna("")
@@ -309,7 +310,6 @@ def extract_scanned_pdf_with_ocr(pdf_path, llm):
         if not ocr_full_text:
             return "", ""
 
-        # Step 1: Clean paragraph-only body
         prompt_clean = f"""You are a document cleaner.
 From the following OCR text, remove any tables or structured data.
 Only return the clean paragraph-like body text for QA and summarization.
@@ -317,9 +317,8 @@ Only return the clean paragraph-like body text for QA and summarization.
 OCR Text:
 {ocr_full_text}
 """
-        clean_text = llm.invoke(prompt_clean) if prompt_clean.strip() else ""
+        clean_text = llm.invoke(prompt_clean).content if prompt_clean.strip() else ""
 
-        # Step 2: Extract structured tables
         prompt_table = f"""You are a table understanding expert.
 Extract all tables from the following OCR text and convert them to CSV format.
 Ensure each table is clearly separated and labeled.
@@ -327,7 +326,7 @@ Ensure each table is clearly separated and labeled.
 OCR Text:
 {ocr_full_text}
 """
-        table_csv = llm.invoke(prompt_table) if prompt_table.strip() else ""
+        table_csv = llm.invoke(prompt_table).content if prompt_table.strip() else ""
 
         final = clean_text.strip()
         if table_csv and "No tables found" not in table_csv:
@@ -373,7 +372,7 @@ def extract_all_tables(pdf_path, scanned_mode=False, llm=None):
         text = ""
 
     prompt = f"You are a table understanding expert.\n\nExtract all tables and convert to CSV:\n\n{text}"
-    llm_csv = llm.invoke(prompt) if prompt.strip() else ""
+    llm_csv = llm.invoke(prompt).content if prompt.strip() else ""
 
     table_texts = [f"Table {i+1}:\n{df.to_csv(index=False)}" for i, df in enumerate(dfs)]
     table_texts.append("LLM-Structured Tables:\n" + llm_csv)
@@ -388,23 +387,34 @@ def load_and_index(files, scanned_mode=False):
             path = os.path.join(td, file.name)
             with open(path, "wb") as f:
                 f.write(file.getbuffer())
+
             if os.path.getsize(path) == 0:
                 st.warning(f"⚠ Skipping {file.name} — file is empty or not fully uploaded.")
                 continue
+
             try:
                 loader = PyPDFLoader(path)
                 all_docs.extend(loader.load())
+
                 text_csv, raw_text = extract_all_tables(path, scanned_mode, llm)
+                if not (text_csv or raw_text):
+                    st.warning(f"⚠ Skipping {file.name} — no valid content extracted.")
+                    continue
+
                 all_docs.append(Document(page_content=text_csv + "\n" + raw_text, metadata={"source": file.name}))
             except Exception as e:
                 logging.error(f"Failed to process {file.name}: {e}")
                 st.error(f"Failed to process {file.name}: {e}")
 
     if not all_docs:
-        st.warning("No documents were successfully loaded or extracted.")
+        st.warning("⚠ No documents were successfully loaded or extracted.")
         return None
 
     chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(all_docs)
+    if not chunks:
+        st.error("❌ No content extracted to index. Check your PDFs or OCR.")
+        return None
+
     try:
         embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
         vs = FAISS.from_documents(chunks, embeddings)
@@ -453,7 +463,7 @@ with st.sidebar:
         st.session_state.msgs = []
         st.success("Chat cleared")
 
-# --- Main ---
+# --- Main Interface ---
 if "vs" not in st.session_state:
     st.session_state.vs = load_existing_index()
 if "msgs" not in st.session_state:
@@ -464,7 +474,7 @@ if run and uploaded:
     with st.spinner("Processing documents and building index..."):
         st.session_state.vs = load_and_index(uploaded, scanned_mode)
     if st.session_state.vs:
-        st.session_state.msgs.append({"role": "assistant", "content": "Extraction & indexing done. Ask anything!"})
+        st.session_state.msgs.append({"role": "assistant", "content": "✅ Extraction & indexing done. Ask anything!"})
 
 for msg in st.session_state.msgs:
     with st.chat_message(msg["role"]):
