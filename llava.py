@@ -1,3 +1,5 @@
+# app.py — Dual-mode PDF QA with MMOCR + LLaMA3 and Text-based + Table Extraction
+
 import os
 import tempfile
 import shutil
@@ -29,6 +31,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnablePassthrough
 
+# --- Config ---
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_LLM_MODEL = "llama3:latest"
@@ -38,9 +41,9 @@ CHAT_DIR = "./chat_sessions"
 
 st.set_page_config(page_title="PDF QA with Tables", layout="wide")
 st.title("📄 PDF Extractor & QA (Scanned + Unscanned)")
-
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
+# --- OCR using MMOCR ---
 def run_mmocr(images):
     inferencer = TextRecInferencer(rec='sar', det='dbnet', device='cpu')
     results = inferencer(images, return_vis=False)
@@ -48,14 +51,16 @@ def run_mmocr(images):
     for res in results["predictions"]:
         txt = " ".join([r["text"] for r in res["instances"]])
         texts.append(txt)
-    return "".join(texts)
+    return "\n".join(texts)
 
+# --- Clean tables using LLaMA ---
 def extract_text_with_llama(text):
     prompt = f"""You are a table cleaning expert.
 
 From the following OCR or raw text, extract all tables and present them in cleaned CSV format:
 
-{text}"""
+{text}
+"""
     try:
         res = requests.post(
             url=f"{OLLAMA_BASE_URL}/api/generate",
@@ -67,15 +72,17 @@ From the following OCR or raw text, extract all tables and present them in clean
         logging.error(f"LLaMA extraction failed: {e}")
         return ""
 
+# --- Extract from Scanned PDF using MMOCR + LLaMA ---
 def extract_from_scanned(pdf_path):
     images = convert_from_path(pdf_path, dpi=300)
     texts = []
     for img in tqdm(images, desc="MMOCR"):
         texts.append(run_mmocr([img]))
-    full_text = "".join(texts)
+    full_text = "\n".join(texts)
     cleaned = extract_text_with_llama(full_text)
-    return cleaned + "" + full_text
+    return cleaned + "\n" + full_text
 
+# --- Extract from Unscanned PDF using pdfplumber + camelot ---
 def extract_from_unscanned(pdf_path):
     text = ""
     tables = []
@@ -83,7 +90,7 @@ def extract_from_unscanned(pdf_path):
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
                 t = page.extract_text()
-                text += t + "" if t else ""
+                text += t + "\n" if t else ""
                 page_tables = page.extract_tables()
                 for tbl in page_tables:
                     if tbl:
@@ -100,10 +107,11 @@ def extract_from_unscanned(pdf_path):
     except Exception as e:
         logging.warning(f"camelot failed: {e}")
 
-        raw = text + "" + "".join(tables)
-        cleaned = extract_text_with_llama(raw)
-    return cleaned + "" + raw
+    raw = text + "\n" + "\n".join(tables)
+    cleaned = extract_text_with_llama(raw)
+    return cleaned + "\n" + raw
 
+# --- Indexing Logic ---
 @st.cache_resource(show_spinner=False)
 def load_and_index(files, scanned_mode):
     all_docs = []
@@ -134,6 +142,7 @@ def load_and_index(files, scanned_mode):
         st.error(f"FAISS error: {e}")
         return None
 
+# --- Chat Chain ---
 def get_chat_chain(vs):
     prompt = ChatPromptTemplate.from_template("""You are a helpful assistant.
 
@@ -150,7 +159,7 @@ def clear_db():
     if os.path.exists(DB_DIR):
         shutil.rmtree(DB_DIR)
 
-# Sidebar
+# --- Sidebar UI ---
 with st.sidebar:
     st.header("📂 Upload PDFs")
     uploaded = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
@@ -162,10 +171,11 @@ with st.sidebar:
     if st.button("🔁 Clear Chat"):
         st.session_state.msgs = []
 
-# Main Chat UI
+# --- Main Chat UI ---
 if "vs" not in st.session_state:
     if os.path.exists(DB_DIR):
         st.session_state.vs = FAISS.load_local(DB_DIR, OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL), allow_dangerous_deserialization=True)
+
 if "msgs" not in st.session_state:
     st.session_state.msgs = []
 
@@ -174,7 +184,7 @@ if run and uploaded:
     with st.spinner("Processing PDFs..."):
         st.session_state.vs = load_and_index(uploaded, scanned_mode)
     if st.session_state.vs:
-        st.session_state.msgs.append({"role": "assistant", "content": "Extraction & indexing done! Ask your question."})
+        st.session_state.msgs.append({"role": "assistant", "content": "✅ Extraction & indexing complete. Ask your question!"})
 
 for msg in st.session_state.msgs:
     with st.chat_message(msg["role"]):
@@ -193,4 +203,4 @@ if query := st.chat_input("Ask about the PDFs..."):
                 st.markdown(resp)
                 st.session_state.msgs.append({"role": "assistant", "content": resp})
     else:
-        st.error("Please upload and index PDF files first.")
+        st.error("Please upload and process PDFs first.")
