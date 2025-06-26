@@ -1,5 +1,3 @@
-# app.py — Dual-mode PDF QA with MMOCR + LLaMA3 and Text-based + Table Extraction
-
 import os
 import tempfile
 import shutil
@@ -8,12 +6,9 @@ import streamlit as st
 import fitz  # PyMuPDF
 import requests
 import json
-import uuid
 from datetime import datetime
 from PIL import Image
 from pdf2image import convert_from_path
-from io import BytesIO
-import base64
 import pandas as pd
 import camelot
 import pdfplumber
@@ -90,7 +85,8 @@ def extract_from_unscanned(pdf_path):
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
                 t = page.extract_text()
-                text += t + "\n" if t else ""
+                if t:
+                    text += t + "\n"
                 page_tables = page.extract_tables()
                 for tbl in page_tables:
                     if tbl:
