@@ -1,16 +1,17 @@
-# --- Imports ---
+# app.py
 import os
 import tempfile
 import shutil
 import logging
 import streamlit as st
 import pandas as pd
-import requests
+import base64
+from PIL import Image
+import fitz  # PyMuPDF
 import json
 import uuid
 from datetime import datetime
-from PIL import Image
-from pdf2image import convert_from_path
+import requests
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -32,7 +33,7 @@ CHAT_DIR = "./chat_sessions"
 
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
-st.set_page_config(page_title="📄 PDF QA with Tables", layout="wide")
+st.set_page_config(page_title="PDF QA with Tables", layout="wide")
 st.markdown("""
     <style>
         section[data-testid="stSidebar"] {
@@ -41,32 +42,43 @@ st.markdown("""
         }
     </style>
 """, unsafe_allow_html=True)
-st.title("📄 PDF Text & Table Extractor + Chat QA")
+st.title("\U0001F4C4 PDF Text & Table Extractor + Chat QA")
 
-# --- Unified LLaVA PDF Processing ---
+# --- Helpers ---
 def extract_with_llava(pdf_path):
+    text_outputs = []
+    images = []
     try:
-        images = convert_from_path(pdf_path)
-        all_content = ""
-        for i, img in enumerate(images):
-            img_path = f"page_{i}.png"
-            img.save(img_path)
-            prompt = "Extract all tables and paragraphs from this document page in readable format. Use CSV for tables."
-            with open(img_path, "rb") as f:
-                image_data = f.read()
-            response = requests.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json={"model": OLLAMA_LLM_MODEL, "prompt": prompt, "image": image_data, "stream": False},
-                timeout=300
-            )
-            result = response.json()
-            all_content += f"--- Page {i+1} ---\n" + result.get("response", "") + "\n\n"
-            os.remove(img_path)
-        return all_content.strip(), all_content.strip()
+        images = fitz.open(pdf_path)
+        for page_num in range(len(images)):
+            pix = images[page_num].get_pixmap()
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                img_path = tmp.name
+                pix.save(img_path)
+
+                with open(img_path, "rb") as f:
+                    image_data = base64.b64encode(f.read()).decode("utf-8")
+
+                prompt = "Extract all text and tables from this PDF page. If it's a table, return it in CSV format."
+
+                response = requests.post(
+                    f"{OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": OLLAMA_LLM_MODEL,
+                        "prompt": prompt,
+                        "images": [image_data],
+                        "stream": False
+                    },
+                    timeout=300
+                )
+                result = response.json()
+                extracted = result.get("response", "")
+                if extracted.strip():
+                    text_outputs.append(extracted)
     except Exception as e:
         logging.error(f"LLaVA extraction failed: {e}")
         st.error(f"LLaVA extraction failed: {e}")
-        return "", ""
+    return "\n\n".join(text_outputs)
 
 @st.cache_resource(show_spinner=False)
 def load_and_index(files):
@@ -77,16 +89,17 @@ def load_and_index(files):
             with open(path, "wb") as f:
                 f.write(file.getbuffer())
             try:
-                loader = PyPDFLoader(path)
-                all_docs.extend(loader.load())
-                text_csv, raw_text = extract_with_llava(path)
-                all_docs.append(Document(page_content=text_csv + "\n" + raw_text, metadata={"source": file.name}))
+                extracted_text = extract_with_llava(path)
+                if extracted_text.strip():
+                    all_docs.append(Document(page_content=extracted_text, metadata={"source": file.name}))
+                else:
+                    st.warning(f"No content extracted from {file.name}, skipping.")
             except Exception as e:
                 logging.error(f"Failed to process {file.name}: {e}")
                 st.error(f"Failed to process {file.name}: {e}")
 
     if not all_docs:
-        st.warning("No documents were successfully loaded or extracted.")
+        st.error("No documents were successfully extracted.")
         return None
 
     chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(all_docs)
@@ -94,7 +107,7 @@ def load_and_index(files):
         embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
         vs = FAISS.from_documents(chunks, embeddings)
         vs.save_local(DB_DIR)
-        st.success("✅ Documents processed and indexed successfully!")
+        st.success("\u2705 Documents processed and indexed successfully!")
         return vs
     except Exception as e:
         logging.error(f"FAISS indexing error: {e}")
@@ -113,7 +126,7 @@ def load_existing_index():
         return None
 
 def get_chat_chain(vs):
-    prompt = ChatPromptTemplate.from_template("You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
+    prompt = ChatPromptTemplate.from_template("You are a document expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
     llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
     return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
 
@@ -183,7 +196,7 @@ with st.sidebar:
             st.session_state.vs = load_existing_index()
             st.rerun()
 
-# --- Main Interface ---
+# --- Main ---
 if "vs" not in st.session_state:
     st.session_state.vs = load_existing_index()
 if "msgs" not in st.session_state:
@@ -194,7 +207,7 @@ if run and uploaded:
     with st.spinner("Processing documents and building index..."):
         st.session_state.vs = load_and_index(uploaded)
     if st.session_state.vs:
-        st.session_state.msgs.append({"role": "assistant", "content": "✅ Extraction & indexing done. Ask anything!"})
+        st.session_state.msgs.append({"role": "assistant", "content": "Extraction & indexing done. Ask anything!"})
 
 for msg in st.session_state.msgs:
     with st.chat_message(msg["role"]):
