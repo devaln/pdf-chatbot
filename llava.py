@@ -1,4 +1,3 @@
-# app.py
 import os
 import tempfile
 import shutil
@@ -6,12 +5,13 @@ import logging
 import streamlit as st
 import pandas as pd
 import base64
-from PIL import Image
-import fitz  # PyMuPDF
+import requests
 import json
 import uuid
 from datetime import datetime
-import requests
+from PIL import Image
+from pdf2image import convert_from_path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -26,7 +26,7 @@ from langchain_core.runnables import RunnablePassthrough
 # --- Config ---
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_LLM_MODEL = "llava:latest"
+OLLAMA_LLM_MODEL = "llama3:latest"
 OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
 DB_DIR = "./faiss_db"
 CHAT_DIR = "./chat_sessions"
@@ -34,51 +34,46 @@ CHAT_DIR = "./chat_sessions"
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
 st.set_page_config(page_title="PDF QA with Tables", layout="wide")
-st.markdown("""
-    <style>
-        section[data-testid="stSidebar"] {
-            background-color: white !important;
-            border-right: 2px solid #e0e0e0 !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
-st.title("\U0001F4C4 PDF Text & Table Extractor + Chat QA")
+st.title("📄 PDF Text & Table Extractor + Chat QA")
 
-# --- Helpers ---
+# --- LLaVA-based Extraction ---
 def extract_with_llava(pdf_path):
-    text_outputs = []
-    images = []
     try:
-        images = fitz.open(pdf_path)
-        for page_num in range(len(images)):
-            pix = images[page_num].get_pixmap()
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                img_path = tmp.name
-                pix.save(img_path)
+        images = convert_from_path(pdf_path)
+        results = []
+        total = len(images)
+        progress = st.progress(0)
 
-                with open(img_path, "rb") as f:
-                    image_data = base64.b64encode(f.read()).decode("utf-8")
+        def process_page(index, img):
+            img = img.resize((768, int(img.height * 768 / img.width)))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_img:
+                img.save(temp_img.name)
+                with open(temp_img.name, "rb") as f:
+                    img_base64 = base64.b64encode(f.read()).decode("utf-8")
+            prompt = "Extract all tables and text from this document image. Return tables in CSV format followed by the text."
+            response = requests.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={"model": "llava:latest", "prompt": prompt, "images": [img_base64], "stream": False},
+                timeout=180
+            )
+            os.unlink(temp_img.name)
+            result = response.json()
+            return result.get("response", "")
 
-                prompt = "Extract all text and tables from this PDF page. If it's a table, return it in CSV format."
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(process_page, i, img): i for i, img in enumerate(images)}
+            for i, future in enumerate(as_completed(futures)):
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    logging.error(f"LLaVA error on page {futures[future]}: {e}")
+                progress.progress((i + 1) / total)
 
-                response = requests.post(
-                    f"{OLLAMA_BASE_URL}/api/generate",
-                    json={
-                        "model": OLLAMA_LLM_MODEL,
-                        "prompt": prompt,
-                        "images": [image_data],
-                        "stream": False
-                    },
-                    timeout=300
-                )
-                result = response.json()
-                extracted = result.get("response", "")
-                if extracted.strip():
-                    text_outputs.append(extracted)
+        return "\n\n".join(results)
     except Exception as e:
         logging.error(f"LLaVA extraction failed: {e}")
         st.error(f"LLaVA extraction failed: {e}")
-    return "\n\n".join(text_outputs)
+        return ""
 
 @st.cache_resource(show_spinner=False)
 def load_and_index(files):
@@ -89,17 +84,16 @@ def load_and_index(files):
             with open(path, "wb") as f:
                 f.write(file.getbuffer())
             try:
-                extracted_text = extract_with_llava(path)
-                if extracted_text.strip():
-                    all_docs.append(Document(page_content=extracted_text, metadata={"source": file.name}))
-                else:
-                    st.warning(f"No content extracted from {file.name}, skipping.")
+                loader = PyPDFLoader(path)
+                all_docs.extend(loader.load())
+                llava_text = extract_with_llava(path)
+                all_docs.append(Document(page_content=llava_text, metadata={"source": file.name}))
             except Exception as e:
                 logging.error(f"Failed to process {file.name}: {e}")
                 st.error(f"Failed to process {file.name}: {e}")
 
     if not all_docs:
-        st.error("No documents were successfully extracted.")
+        st.warning("No documents were successfully loaded or extracted.")
         return None
 
     chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(all_docs)
@@ -107,7 +101,7 @@ def load_and_index(files):
         embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
         vs = FAISS.from_documents(chunks, embeddings)
         vs.save_local(DB_DIR)
-        st.success("\u2705 Documents processed and indexed successfully!")
+        st.success("✅ Documents processed and indexed successfully!")
         return vs
     except Exception as e:
         logging.error(f"FAISS indexing error: {e}")
@@ -126,7 +120,7 @@ def load_existing_index():
         return None
 
 def get_chat_chain(vs):
-    prompt = ChatPromptTemplate.from_template("You are a document expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
+    prompt = ChatPromptTemplate.from_template("You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
     llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
     return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
 
@@ -135,17 +129,17 @@ def clear_db():
         shutil.rmtree(DB_DIR)
         logging.info(f"FAISS DB directory '{DB_DIR}' cleared.")
 
-# --- Sidebar ---
+# --- UI Sidebar ---
 with st.sidebar:
     st.image("img/ACL_Digital.png", width=180)
     st.image("img/Cipla_Foundation.png", width=180)
-    st.markdown("""<hr>""", unsafe_allow_html=True)
+    st.markdown("<hr>", unsafe_allow_html=True)
 
     st.header("📂 Upload PDFs")
     uploaded = st.file_uploader("Select PDFs", type="pdf", accept_multiple_files=True)
     run = st.button("📊 Extract & Index")
 
-    st.markdown("""<hr>""", unsafe_allow_html=True)
+    st.markdown("<hr>", unsafe_allow_html=True)
     st.header("🛠 Control")
     if st.button("🗑 Clear DB"):
         clear_db()
@@ -155,16 +149,14 @@ with st.sidebar:
         st.session_state.msgs = []
         st.success("Chat cleared")
 
-    st.markdown("""<hr>""", unsafe_allow_html=True)
+    st.markdown("<hr>", unsafe_allow_html=True)
     st.header("💬 Chat History")
     os.makedirs(CHAT_DIR, exist_ok=True)
 
     def summarize_chat(msgs):
         for msg in msgs:
             if msg["role"] == "user" and msg["content"].strip():
-                first_line = msg["content"].strip().split("\n")[0]
-                summary = first_line.strip()[:40].replace(" ", "_").replace("?", "").replace(":", "")
-                return summary.lower()
+                return msg["content"].strip().split("\n")[0][:40].replace(" ", "_").replace("?", "").replace(":", "").lower()
         return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     if "chat_id" not in st.session_state:
@@ -181,11 +173,7 @@ with st.sidebar:
             json.dump([], f)
         st.rerun()
 
-    session_files = sorted(
-        [f for f in os.listdir(CHAT_DIR) if f.endswith(".json")],
-        key=lambda x: os.path.getmtime(os.path.join(CHAT_DIR, x)),
-        reverse=True
-    )[:10]
+    session_files = sorted([f for f in os.listdir(CHAT_DIR) if f.endswith(".json")], key=lambda x: os.path.getmtime(os.path.join(CHAT_DIR, x)), reverse=True)[:10]
 
     for fname in session_files:
         label = fname.replace(".json", "").replace("_", " ").title()
