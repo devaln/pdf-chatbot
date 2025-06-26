@@ -4,12 +4,12 @@ pytesseract
 pdf2image
 PyMuPDF
 requests
-langchain
-faiss-cpu
 tqdm
-pypdf
-pdfminer.six
+langchain
+langchain-community
+faiss-cpu
 nomic
 openai
+pypdf
+pdfminer.six
 llama-index
-langchain-community
