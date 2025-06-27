@@ -84,22 +84,42 @@ def extract_tables_camelot(pdf_path):
 def extract_scanned_pdf_with_ocr(pdf_path):
     try:
         images = convert_from_path(pdf_path)
-        full_ocr_blocks = []
+        full_dfs = []
+
         for img in images:
             ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DATAFRAME)
-            ocr_data = ocr_data.dropna().reset_index(drop=True)
+            ocr_data = ocr_data.dropna(subset=["text"]).reset_index(drop=True)
 
-            grouped = ocr_data.groupby(['page_num', 'block_num', 'par_num', 'line_num'])
+            # Remove garbage text (confidence too low)
+            ocr_data = ocr_data[ocr_data['conf'].astype(int) > 40]
+
+            # Group by line
+            grouped = ocr_data.groupby(['block_num', 'par_num', 'line_num'])
+            rows = []
             for _, group in grouped:
-                line_text = " ".join(group['text'].tolist())
-                if len(line_text.strip()) > 3:
-                    full_ocr_blocks.append(line_text)
+                group = group.sort_values('left')  # sort words by x-position
+                row = group['text'].tolist()
+                rows.append(row)
 
-        full_text = "\n".join(full_ocr_blocks)
+            # Pad rows to same length
+            max_cols = max(len(row) for row in rows)
+            padded_rows = [row + [""] * (max_cols - len(row)) for row in rows]
 
-        llm_prompt = f"""You are a table extraction expert. Extract all tables from the below OCR-processed text and convert them into CSV format. Only return CSV tables, no explanation.
+            df = pd.DataFrame(padded_rows)
+            full_dfs.append(df)
 
-{full_text}"""
+        # Combine all pages
+        final_df = pd.concat(full_dfs).reset_index(drop=True)
+        final_df = final_df.replace("", pd.NA).dropna(how="all").fillna("")
+
+        csv_text = final_df.to_csv(index=False)
+
+        # Optional: pass to LLM for structure understanding
+        llm_prompt = f"""You are a table cleanup assistant. Convert the following CSV table into a cleaned-up version with correct column headers and values:
+
+{csv_text}
+
+Only return the cleaned CSV, no explanation."""
 
         response = requests.post(
             url=f"{OLLAMA_BASE_URL}/api/generate",
@@ -107,8 +127,8 @@ def extract_scanned_pdf_with_ocr(pdf_path):
             timeout=120
         )
         result = response.json()
-        csv_text = result.get("response", "")
-        return csv_text, full_text
+        llm_csv = result.get("response", "")
+        return llm_csv, csv_text
     except Exception as e:
         logging.error(f"OCR + LLM extraction failed: {e}")
         st.error(f"OCR + LLM failed: {e}")
