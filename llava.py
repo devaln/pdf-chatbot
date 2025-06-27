@@ -1,3 +1,4 @@
+# --- Imports ---
 import os
 import tempfile
 import shutil
@@ -9,8 +10,6 @@ from PIL import Image
 import fitz  # PyMuPDF
 import pdfplumber
 import camelot
-import torch
-import requests
 import pytesseract
 from pdf2image import convert_from_path
 import json
@@ -38,14 +37,6 @@ CHAT_DIR = "./chat_sessions"
 logging.basicConfig(level=logging.INFO, filename="app.log", format="%(asctime)s [%(levelname)s] %(message)s")
 
 st.set_page_config(page_title="PDF QA with Tables", layout="wide")
-st.markdown("""
-    <style>
-        section[data-testid="stSidebar"] {
-            background-color: white !important;
-            border-right: 2px solid #e0e0e0 !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
 st.title("📄 PDF Text & Table Extractor + Chat QA")
 
 # --- Helpers ---
@@ -58,13 +49,13 @@ def extract_tables_pdfplumber(pdf_path):
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                tbls = page.extract_tables()
-                for table in tbls:
+                tables = page.extract_tables()
+                for table in tables:
                     if table:
                         df = pd.DataFrame(table[1:], columns=table[0])
                         dfs.append(clean_df(df))
     except Exception as e:
-        logging.warning(f"pdfplumber failed for {os.path.basename(pdf_path)}: {e}")
+        logging.warning(f"pdfplumber failed: {e}")
     return dfs
 
 def extract_tables_camelot(pdf_path):
@@ -74,54 +65,57 @@ def extract_tables_camelot(pdf_path):
             tables = camelot.read_pdf(pdf_path, pages='all', flavor=flavor)
             for t in tables:
                 df = t.df
-                if df.shape[0] > 1 and df.shape[1] > 1:
+                if df.shape[0] > 1:
                     dfs.append(clean_df(df))
         except Exception as e:
-            logging.warning(f"camelot {flavor} failed for {os.path.basename(pdf_path)}: {e}")
+            logging.warning(f"camelot {flavor} failed: {e}")
     return dfs
 
-# ✅ Improved Scanned PDF Table Extraction
 def extract_scanned_pdf_with_ocr(pdf_path):
     try:
         images = convert_from_path(pdf_path)
         full_dfs = []
 
         for img in images:
-            # Step 1: OCR with bounding box info
             ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DATAFRAME)
-            ocr_data = ocr_data.dropna(subset=["text"]).reset_index(drop=True)
+            ocr_data = ocr_data.dropna(subset=["text"])
             ocr_data = ocr_data[ocr_data['conf'].astype(int) > 40]
 
-            # Step 2: Group words by line
             grouped = ocr_data.groupby(['block_num', 'par_num', 'line_num'])
             rows = []
             for _, group in grouped:
-                group = group.sort_values("left")
-                row = group["text"].tolist()
-                rows.append(row)
+                line = group.sort_values("left")["text"].tolist()
+                rows.append(line)
 
-            # Step 3: Pad rows to equal length
+            if not rows:
+                continue
+
             max_cols = max(len(row) for row in rows)
             padded = [row + [""] * (max_cols - len(row)) for row in rows]
-            df = pd.DataFrame(padded)
-            full_dfs.append(df)
+            df_raw = pd.DataFrame(padded)
 
-        # Step 4: Combine pages and clean
-        combined_df = pd.concat(full_dfs).reset_index(drop=True)
-        combined_df = combined_df.replace("", pd.NA).dropna(how="all").fillna("")
+            df_raw = df_raw.replace("", pd.NA).dropna(how="all").fillna("")
 
-        # Optional: Preview in Streamlit for debug
-        st.subheader("📸 Extracted Table from Scanned PDF (Structured by OCR)")
-        st.dataframe(combined_df)
+            # Auto-detect header as the first valid non-empty row
+            header_row_idx = df_raw.apply(lambda row: row.str.len().gt(1).sum(), axis=1).idxmax()
+            headers = df_raw.iloc[header_row_idx].tolist()
+            headers = [h if h.strip() else "column" for h in headers]
+            headers = pd.io.parsers.ParserBase({'names': headers})._maybe_dedup_names(headers)
 
-        # Step 5: Convert to CSV string for vector index
-        csv_text = combined_df.to_csv(index=False)
-        return csv_text, combined_df.to_string(index=False)
+            df_data = df_raw.iloc[header_row_idx + 1:].reset_index(drop=True)
+            df_data.columns = headers
+            full_dfs.append(df_data)
+
+        if not full_dfs:
+            return "", ""
+
+        combined = pd.concat(full_dfs).reset_index(drop=True)
+        csv_text = combined.to_csv(index=False)
+        return csv_text, combined.to_string(index=False)
     except Exception as e:
-        logging.error(f"OCR table extraction failed: {e}")
-        st.error(f"OCR table extraction failed: {e}")
+        logging.error(f"OCR failed: {e}")
         return "", ""
-    
+
 def extract_all_tables(pdf_path, scanned_mode=False):
     if scanned_mode:
         return extract_scanned_pdf_with_ocr(pdf_path)
@@ -129,35 +123,15 @@ def extract_all_tables(pdf_path, scanned_mode=False):
     dfs = extract_tables_pdfplumber(pdf_path)
     dfs += extract_tables_camelot(pdf_path)
 
+    full_text = ""
     try:
         doc = fitz.open(pdf_path)
-        text = "\n".join([page.get_text() for page in doc])
+        full_text = "\n".join([page.get_text() for page in doc])
     except Exception as e:
-        logging.error(f"PDF text extraction failed: {e}")
-        text = ""
+        logging.error(f"Text extraction failed: {e}")
 
-    prompt = f"You are a table understanding expert.\n\nExtract all tables from the following document and convert them to CSV format:\n\n{text}\n\nOnly return CSV-formatted tables."
-
-    try:
-        response = requests.post(
-            url=f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_LLM_MODEL, "prompt": prompt, "stream": False},
-            timeout=120
-        )
-        result = response.json()
-        llm_csv = result.get("response", "")
-    except Exception as e:
-        logging.error(f"LLM extraction failed: {e}")
-        llm_csv = ""
-
-    table_texts = []
-    for i, df in enumerate(dfs):
-        st.subheader(f"Table {i+1} (Raw)")
-        st.dataframe(df)
-        table_texts.append(f"Table {i+1}:\n{df.to_csv(index=False)}")
-
-    table_texts.append("LLM-Structured Tables:\n" + llm_csv)
-    return "\n\n".join(table_texts), text
+    all_tables = [df.to_csv(index=False) for df in dfs]
+    return "\n\n".join(all_tables), full_text
 
 @st.cache_resource(show_spinner=False)
 def load_and_index(files, scanned_mode=False):
@@ -170,129 +144,58 @@ def load_and_index(files, scanned_mode=False):
             try:
                 loader = PyPDFLoader(path)
                 all_docs.extend(loader.load())
-                text_csv, raw_text = extract_all_tables(path, scanned_mode)
-                all_docs.append(Document(page_content=text_csv + "\n" + raw_text, metadata={"source": file.name}))
+                tables_text, full_text = extract_all_tables(path, scanned_mode)
+                all_docs.append(Document(page_content=tables_text + "\n" + full_text, metadata={"source": file.name}))
             except Exception as e:
-                logging.error(f"Failed to process {file.name}: {e}")
-                st.error(f"Failed to process {file.name}: {e}")
+                logging.error(f"Failed: {e}")
+                st.error(f"Failed: {e}")
 
     if not all_docs:
-        st.warning("No documents were successfully loaded or extracted.")
         return None
 
     chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(all_docs)
     try:
-        embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
-        vs = FAISS.from_documents(chunks, embeddings)
+        embed = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
+        vs = FAISS.from_documents(chunks, embed)
         vs.save_local(DB_DIR)
-        st.success("✅ Documents processed and indexed successfully!")
+        st.success("✅ Index built.")
         return vs
     except Exception as e:
-        logging.error(f"FAISS indexing error: {e}")
-        st.error(f"FAISS indexing error: {e}")
-        return None
-
-def load_existing_index():
-    if not os.path.exists(DB_DIR):
-        return None
-    try:
-        embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
-        return FAISS.load_local(DB_DIR, embeddings, allow_dangerous_deserialization=True)
-    except Exception as e:
-        logging.error(f"Failed to load existing FAISS DB: {e}")
-        st.error(f"Failed to load existing FAISS DB: {e}")
+        logging.error(f"Indexing error: {e}")
         return None
 
 def get_chat_chain(vs):
-    prompt = ChatPromptTemplate.from_template("You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:")
+    prompt = ChatPromptTemplate.from_template(
+        "You are a table analysis expert.\n\nContext:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    )
     llm = ChatOllama(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
     return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
 
-def clear_db():
+# --- UI ---
+st.sidebar.header("📂 Upload PDFs")
+uploaded = st.sidebar.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
+scanned_mode = st.sidebar.checkbox("📸 Scanned PDF (image only)?")
+if st.sidebar.button("📊 Extract & Index"):
+    st.session_state.vs = load_and_index(uploaded, scanned_mode)
+    st.session_state.msgs = [{"role": "assistant", "content": "✅ You can now ask questions!"}]
+
+if st.sidebar.button("🗑 Clear DB"):
     if os.path.exists(DB_DIR):
         shutil.rmtree(DB_DIR)
-        logging.info(f"FAISS DB directory '{DB_DIR}' cleared.")
+    st.session_state.vs = None
+    st.success("Database cleared.")
 
-# --- Sidebar ---
-with st.sidebar:
-    st.image("img/ACL_Digital.png", width=180)
-    st.image("img/Cipla_Foundation.png", width=180)
-    st.markdown("""<hr>""", unsafe_allow_html=True)
-
-    st.header("📂 Upload PDFs")
-    uploaded = st.file_uploader("Select PDFs", type="pdf", accept_multiple_files=True)
-    scanned_mode = st.checkbox("📸 PDF is scanned (image only)?")
-    run = st.button("📊 Extract & Index", key="extract_btn")
-
-    st.markdown("""<hr>""", unsafe_allow_html=True)
-    st.header("🛠 Control")
-    if st.button("🗑 Clear DB", key="clear_db"):
-        clear_db()
-        st.session_state.vs = None
-        st.success("DB cleared")
-    if st.button("🧹 Clear Chat", key="clear_chat"):
-        st.session_state.msgs = []
-        st.success("Chat cleared")
-
-    st.markdown("""<hr>""", unsafe_allow_html=True)
-    st.header("💬 Chat History")
-    os.makedirs(CHAT_DIR, exist_ok=True)
-
-    def summarize_chat(msgs):
-        for msg in msgs:
-            if msg["role"] == "user" and msg["content"].strip():
-                first_line = msg["content"].strip().split("\n")[0]
-                summary = first_line.strip()[:40].replace(" ", "_").replace("?", "").replace(":", "")
-                return summary.lower()
-        return f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    if "chat_id" not in st.session_state:
-        base = summarize_chat(st.session_state.get("msgs", []))
-        st.session_state.chat_id = f"{base}_{uuid.uuid4().hex[:4]}"
-        with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-            json.dump([], f)
-
-    if st.button("➕ New Chat", key="new_chat"):
-        base = summarize_chat(st.session_state.get("msgs", []))
-        st.session_state.chat_id = f"{base}_{uuid.uuid4().hex[:4]}"
-        st.session_state.msgs = []
-        with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-            json.dump([], f)
-        st.rerun()
-
-    session_files = sorted(
-        [f for f in os.listdir(CHAT_DIR) if f.endswith(".json")],
-        key=lambda x: os.path.getmtime(os.path.join(CHAT_DIR, x)),
-        reverse=True
-    )[:10]
-
-    for fname in session_files:
-        label = " ".join(fname.replace(".json", "").split("_")[:5]).title()
-        if st.button(f"💬 {label}", key=f"chat_{fname}"):
-            st.session_state.chat_id = fname.replace(".json", "")
-            with open(os.path.join(CHAT_DIR, fname), "r") as f:
-                st.session_state.msgs = json.load(f)
-            st.session_state.vs = load_existing_index()
-            st.rerun()
-
-# --- Main ---
 if "vs" not in st.session_state:
-    st.session_state.vs = load_existing_index()
+    st.session_state.vs = load_and_index([])
+
 if "msgs" not in st.session_state:
     st.session_state.msgs = []
-
-if run and uploaded:
-    st.session_state.msgs = []
-    with st.spinner("Processing documents and building index..."):
-        st.session_state.vs = load_and_index(uploaded, scanned_mode)
-    if st.session_state.vs:
-        st.session_state.msgs.append({"role": "assistant", "content": "Extraction & indexing done. Ask anything!"})
 
 for msg in st.session_state.msgs:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if query := st.chat_input("Ask about the PDF content or tables..."):
+if query := st.chat_input("Ask your question..."):
     st.session_state.msgs.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
@@ -300,13 +203,9 @@ if query := st.chat_input("Ask about the PDF content or tables..."):
     if st.session_state.vs:
         chain = get_chat_chain(st.session_state.vs)
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                resp = "".join(chain.stream(query))
-                st.markdown(resp)
-                st.session_state.msgs.append({"role": "assistant", "content": resp})
+            with st.spinner("Answering..."):
+                response = "".join(chain.stream(query))
+                st.markdown(response)
+                st.session_state.msgs.append({"role": "assistant", "content": response})
     else:
-        st.error("Please upload and process PDFs first to enable chat functionality.")
-
-if "chat_id" in st.session_state:
-    with open(os.path.join(CHAT_DIR, f"{st.session_state.chat_id}.json"), "w") as f:
-        json.dump(st.session_state.msgs, f)
+        st.error("Upload and index documents first.")
