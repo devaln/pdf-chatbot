@@ -172,6 +172,9 @@ def get_chat_chain(vs):
     return {"context": vs.as_retriever(), "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()
 
 # --- UI ---
+st.sidebar.image("img/ACL_Digital.png", width=180)
+st.sidebar.image("img/Cipla_Foundation.png", width=180)
+st.sidebar.markdown(""" <hr> """, unsafe_allow_html=True)
 st.sidebar.header("📂 Upload PDFs")
 uploaded = st.sidebar.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
 scanned_mode = st.sidebar.checkbox("📸 Scanned PDF (image only)?")
@@ -179,6 +182,7 @@ if st.sidebar.button("📊 Extract & Index"):
     st.session_state.vs = load_and_index(uploaded, scanned_mode)
     st.session_state.msgs = [{"role": "assistant", "content": "✅ You can now ask questions!"}]
 
+st.sidebar.markdown(""" <hr> """, unsafe_allow_html=True)
 if st.sidebar.button("🗑 Clear DB"):
     if os.path.exists(DB_DIR):
         shutil.rmtree(DB_DIR)
