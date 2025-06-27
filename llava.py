@@ -104,7 +104,6 @@ def extract_scanned_pdf_with_ocr(pdf_path):
 
             df_raw = df_raw.replace("", pd.NA).dropna(how="all").fillna("")
 
-            # Auto-detect header as the first valid non-empty row
             header_row_idx = df_raw.apply(lambda row: row.str.len().gt(1).sum(), axis=1).idxmax()
             headers = df_raw.iloc[header_row_idx].tolist()
             headers = [h if h.strip() else "column" for h in headers]
@@ -161,7 +160,14 @@ def load_and_index(files, scanned_mode=False):
     if not all_docs:
         return None
 
-    chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(all_docs)
+    prev_docs = []
+    if "vs" in st.session_state and st.session_state.vs:
+        try:
+            prev_docs = st.session_state.vs.similarity_search(" ")  # load existing docs
+        except:
+            pass
+
+    chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(all_docs + prev_docs)
     try:
         embed = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
         vs = FAISS.from_documents(chunks, embed)
@@ -186,11 +192,16 @@ st.sidebar.markdown(""" <hr> """, unsafe_allow_html=True)
 st.sidebar.header("📂 Upload PDFs")
 uploaded = st.sidebar.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
 scanned_mode = st.sidebar.checkbox("📸 Scanned PDF (image only)?")
-if st.sidebar.button("📊 Extract & Index"):
-    st.session_state.vs = load_and_index(uploaded, scanned_mode)
-    st.session_state.msgs = [{"role": "assistant", "content": "✅ You can now ask questions!"}]
 
-st.sidebar.markdown(""" <hr> """, unsafe_allow_html=True)
+if st.sidebar.button("📊 Extract & Index"):
+    if uploaded:
+        st.session_state.vs = load_and_index(uploaded, scanned_mode)
+        st.session_state.msgs = [{"role": "assistant", "content": "✅ You can now ask questions!"}]
+
+if st.sidebar.button("🧹 Clear Chat"):
+    st.session_state.msgs = []
+    st.success("Chat cleared.")
+
 if st.sidebar.button("🗑 Clear DB"):
     if os.path.exists(DB_DIR):
         shutil.rmtree(DB_DIR)
@@ -198,7 +209,7 @@ if st.sidebar.button("🗑 Clear DB"):
     st.success("Database cleared.")
 
 if "vs" not in st.session_state:
-    st.session_state.vs = load_and_index([])
+    st.session_state.vs = None
 
 if "msgs" not in st.session_state:
     st.session_state.msgs = []
