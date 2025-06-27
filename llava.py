@@ -87,53 +87,41 @@ def extract_scanned_pdf_with_ocr(pdf_path):
         full_dfs = []
 
         for img in images:
+            # Step 1: OCR with bounding box info
             ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DATAFRAME)
             ocr_data = ocr_data.dropna(subset=["text"]).reset_index(drop=True)
-
-            # Remove garbage text (confidence too low)
             ocr_data = ocr_data[ocr_data['conf'].astype(int) > 40]
 
-            # Group by line
+            # Step 2: Group words by line
             grouped = ocr_data.groupby(['block_num', 'par_num', 'line_num'])
             rows = []
             for _, group in grouped:
-                group = group.sort_values('left')  # sort words by x-position
-                row = group['text'].tolist()
+                group = group.sort_values("left")
+                row = group["text"].tolist()
                 rows.append(row)
 
-            # Pad rows to same length
+            # Step 3: Pad rows to equal length
             max_cols = max(len(row) for row in rows)
-            padded_rows = [row + [""] * (max_cols - len(row)) for row in rows]
-
-            df = pd.DataFrame(padded_rows)
+            padded = [row + [""] * (max_cols - len(row)) for row in rows]
+            df = pd.DataFrame(padded)
             full_dfs.append(df)
 
-        # Combine all pages
-        final_df = pd.concat(full_dfs).reset_index(drop=True)
-        final_df = final_df.replace("", pd.NA).dropna(how="all").fillna("")
+        # Step 4: Combine pages and clean
+        combined_df = pd.concat(full_dfs).reset_index(drop=True)
+        combined_df = combined_df.replace("", pd.NA).dropna(how="all").fillna("")
 
-        csv_text = final_df.to_csv(index=False)
+        # Optional: Preview in Streamlit for debug
+        st.subheader("📸 Extracted Table from Scanned PDF (Structured by OCR)")
+        st.dataframe(combined_df)
 
-        # Optional: pass to LLM for structure understanding
-        llm_prompt = f"""You are a table cleanup assistant. Convert the following CSV table into a cleaned-up version with correct column headers and values:
-
-{csv_text}
-
-Only return the cleaned CSV, no explanation."""
-
-        response = requests.post(
-            url=f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_LLM_MODEL, "prompt": llm_prompt, "stream": False},
-            timeout=120
-        )
-        result = response.json()
-        llm_csv = result.get("response", "")
-        return llm_csv, csv_text
+        # Step 5: Convert to CSV string for vector index
+        csv_text = combined_df.to_csv(index=False)
+        return csv_text, combined_df.to_string(index=False)
     except Exception as e:
-        logging.error(f"OCR + LLM extraction failed: {e}")
-        st.error(f"OCR + LLM failed: {e}")
+        logging.error(f"OCR table extraction failed: {e}")
+        st.error(f"OCR table extraction failed: {e}")
         return "", ""
-
+    
 def extract_all_tables(pdf_path, scanned_mode=False):
     if scanned_mode:
         return extract_scanned_pdf_with_ocr(pdf_path)
